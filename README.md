@@ -10,7 +10,7 @@ A natural-language-to-SQL agent that autonomously detects and self-heals from SQ
 | LLM Inference | LangChain / Groq (Llama 3.3 70B) |
 | Output Validation | Guardrails AI |
 | API Backend | FastAPI + Uvicorn |
-| Data Store | SQLite3 |
+| Data Store | PostgreSQL |
 | Frontend UI | React + Vite |
 | Containerization | Docker & Docker Compose |
 
@@ -18,7 +18,7 @@ A natural-language-to-SQL agent that autonomously detects and self-heals from SQ
 
 1. User asks a question in natural language (e.g. "Who earns more than 80000 in Engineering?").
 2. The agent generates SQL against the known schema.
-3. The query runs against SQLite — on success, results flow to the synthesizer; on failure, the error is fed back into the agent and it retries (up to 3 times).
+3. The query runs against PostgreSQL — on success, results flow to the synthesizer; on failure, the error is fed back into the agent and it retries (up to 3 times).
 4. The final natural-language answer is checked by Guardrails AI for safety and schema-leakage before being returned.
 5. The API response includes the answer, the executed SQL, and step-by-step trace logs for the UI.
 
@@ -27,7 +27,7 @@ See [docs/TECHNICAL_SPEC.md](docs/TECHNICAL_SPEC.md) for the full architecture, 
 ## Project Structure
 
 ```
-backend/    FastAPI app, LangGraph agent, SQLite database
+backend/    FastAPI app, LangGraph agent
 frontend/   React + Vite chat UI
 docs/       Setup guide and technical specification
 ```
@@ -39,6 +39,8 @@ See [docs/SETUP.md](docs/SETUP.md) for git/repo setup steps.
 ```bash
 docker compose up --build
 ```
+
+This brings up three containers: `db` (PostgreSQL), `backend` (FastAPI + agent), and `frontend` (React via Nginx).
 
 ## Roadmap
 

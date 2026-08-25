@@ -1,6 +1,6 @@
 # Self-Healing Data Query Agent: Technical Specification & Implementation Guide
 
-This document provides a comprehensive technical specification, architecture design, and end-to-end implementation details for the Self-Healing Data Query Agent. Built using LangGraph, LangChain, Guardrails AI, FastAPI, SQLite, and React, this system translates natural language questions into structured SQL queries, autonomously detects syntax/schema errors, executes self-healing reflection loops, and validates outputs against security and content policies.
+This document provides a comprehensive technical specification, architecture design, and end-to-end implementation details for the Self-Healing Data Query Agent. Built using LangGraph, LangChain, Guardrails AI, FastAPI, PostgreSQL, and React, this system translates natural language questions into structured SQL queries, autonomously detects syntax/schema errors, executes self-healing reflection loops, and validates outputs against security and content policies.
 
 ## 1. Executive Summary & Core Objectives
 
@@ -20,7 +20,7 @@ The system operates across three primary layers: UI Client, Orchestration/Backen
 | LLM Inference | LangChain / Groq (Llama 3.3 70B) | SQL generation, error reflection, and natural language synthesis. |
 | Output Validation | Guardrails AI | Validates synthesized responses for toxic language, hallucination, and schema integrity. |
 | API Backend | FastAPI + Uvicorn | REST endpoints serving agent execution steps, trace logs, and responses. |
-| Data Store | SQLite3 | Target relational database for executing generated queries. |
+| Data Store | PostgreSQL | Target relational database for executing generated queries. |
 | Frontend UI | React + Vite | Chat interface providing real-time visibility into internal agent thought logs and SQL queries. |
 | Containerization | Docker & Docker Compose | Unified multi-container deployment with Nginx reverse proxy. |
 
@@ -69,7 +69,7 @@ class AgentState(TypedDict):
 
 ## 4. Database Schema & Sample Dataset
 
-The agent connects to a local relational SQLite database representing an enterprise employee directory.
+The agent connects to a PostgreSQL database representing an enterprise employee directory, running as its own container in the Docker Compose stack.
 
 | Column Name | Data Type | Constraints | Description |
 |---|---|---|---|
@@ -83,7 +83,7 @@ The agent connects to a local relational SQLite database representing an enterpr
 
 1. **Query Ingestion**: The user enters a question in the React interface (e.g., "Who earns more than 80000 in Engineering?").
 2. **SQL Construction Node**: The LangGraph agent inspects the database schema and generates the initial SQL query.
-3. **Execution & Inspection**: The query is run against SQLite.
+3. **Execution & Inspection**: The query is run against PostgreSQL.
    - If execution succeeds: Rows are passed forward to the synthesizer.
    - If a syntax/schema error occurs: Error traceback is captured into the state, `retry_count` is incremented, and the agent re-enters the generation node with error context.
 4. **Guardrails Verification**: The final synthesized answer is parsed through Guardrails AI to verify safety and prevent sensitive data leakage.
@@ -93,14 +93,15 @@ The agent connects to a local relational SQLite database representing an enterpr
 
 The application is fully containerized using a multi-service Docker Compose architecture:
 
-- **Backend Service**: Lightweight Python 3.11-slim container running FastAPI with persistent SQLite volume mounting.
+- **Database Service**: `postgres:16` official image with a named volume for data persistence.
+- **Backend Service**: Lightweight Python 3.11-slim container running FastAPI, connecting to the `db` service via SQLAlchemy/psycopg.
 - **Frontend Service**: Multi-stage Node.js build served via high-performance Nginx with built-in `/api/` reverse proxy routing.
-- **Single-Command Orchestration**: Entire stack spins up via `docker compose up --build` with environment variable injection.
+- **Single-Command Orchestration**: Entire stack spins up via `docker compose up --build` with environment variable injection (`DATABASE_URL`, `GROQ_API_KEY`, etc.).
 
 ## 7. Future Extensions & Scaling Roadmap
 
 | Phase | Enhancement Feature | Technical Impact |
 |---|---|---|
-| Phase 2 | Model Context Protocol (MCP) | Replace direct SQLite driver with standard SQLite MCP Server over stdio. |
+| Phase 2 | Model Context Protocol (MCP) | Replace direct Postgres driver with a standard Postgres MCP Server over stdio. |
 | Phase 3 | Human-in-the-Loop (HITL) | Introduce approval pauses before executing destructive queries (UPDATE/DELETE). |
-| Phase 4 | Postgres Checkpointer | Enable cross-session conversation memory and multi-tenant isolation. |
+| Phase 4 | LangGraph Postgres Checkpointer | Enable cross-session conversation memory and multi-tenant isolation using the same Postgres instance. |
