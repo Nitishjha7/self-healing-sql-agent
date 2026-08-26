@@ -1,0 +1,10 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+langgraph==0.2.34
+langchain==0.3.3
+langchain-google-genai==2.0.1
+guardrails-ai==0.5.10
+sqlalchemy==2.0.35
+psycopg2-binary==2.9.9
+python-dotenv==1.0.1
+pydantic==2.9.2
