@@ -37,4 +37,47 @@ Ye file har file/dependency ka **kaam aur reason** track karti hai, taaki baad m
 
 ---
 
+---
+
+## backend/app/graph.py
+
+Ye file **project ka core hai** — poora self-healing LangGraph state machine yahin define hai.
+
+**`AgentState`** — TypedDict jo pura context carry karta hai node-to-node: question, current SQL, result, error, retry count, final answer, logs. Spec me diya gaya schema hi hai.
+
+**`_llm()`** — Gemini 2.0 Flash ko LangChain ke through initialize karta hai. `temperature=0` isliye rakha kyunki SQL generation me hume deterministic/precise output chahiye, creative nahi.
+
+**`_extract_sql()`** — LLM kabhi kabhi SQL ko ```sql ... ``` fenced block me ya extra explanation ke saath deta hai. Ye helper sirf clean SQL nikalta hai.
+
+**`generate_sql` node:**
+- Agar `state["error"]` khaali hai → fresh prompt banata hai (schema + question).
+- Agar error hai (matlab pichhli baar query fail hui) → **self-healing ka core part**: previous SQL + error message dono LLM ko wapas bhejta hai, taaki LLM samajh sake exactly kya galat hua aur fix kare. Ye normal "retry with same prompt" se better hai kyunki LLM ko concrete feedback milta hai.
+
+**`execute_sql` node:**
+- Pehle ek **safety check**: agar generated SQL me `DROP`, `DELETE`, `UPDATE`, `INSERT`, `ALTER`, `TRUNCATE` jaisa koi keyword hai, query turant block ho jaati hai (retry count ko max pe set karke loop se nikal deta hai). Ye basic guardrail hai jo destructive queries ko rokta hai — Phase 3 (HITL) me isko "approve karo" wale flow me upgrade karenge.
+- Warna `run_sql()` (db.py se) call karta hai. Success pe result state me save hota hai; exception aane pe error state me save hoke `retry_count` badhta hai.
+
+**`should_retry` — conditional edge function:**
+Ye decide karta hai graph agla kaun sa node jaayega:
+- Error hai aur retries `< MAX_RETRIES (3)` → wapas `generate_sql` (retry loop)
+- Error hai aur retries khatam → `give_up` (synthesize karega ek apology message ke saath)
+- Error nahi hai → `success` (normal synthesis)
+
+Yehi function hai jo LangGraph ko **cyclic graph** banata hai — normal linear chain me ye possible nahi hota.
+
+**`synthesize_and_validate` node:**
+- Agar sab retries fail ho gaye, ek clean "sorry" message banata hai (raw exception user ko expose nahi karte).
+- Warna LLM se natural-language answer banwata hai. System prompt me explicitly bola hai raw column/table names reveal na kare aur multiple logon ki salary ek saath na dikhaye (basic schema-leakage / privacy guardrail) — ye Guardrails AI library se replace/enhance hoga agle step me, abhi prompt-level safety hai.
+
+**`build_graph()`** — teeno nodes ko wire karta hai:
+```
+generate_sql → execute_sql → (conditional: retry → generate_sql | give_up/success → synthesize_and_validate) → END
+```
+
+**`run_agent(question)`** — external entrypoint jo FastAPI endpoint call karega. Fresh `AgentState` banata hai aur poora graph invoke karta hai, final state return karta hai (jisme `final_answer`, `sql_query`, `logs` sab honge — UI ko yahi dikhana hai).
+
+**Interview-worthy point:** Ye "retry" koi dumb `for` loop nahi hai — ye LangGraph ka **conditional edge** feature use karta hai jisse graph runtime pe decide karta hai kaunsa node next chalega, based on state. Isi wajah se ye ek real state machine hai, sequential script nahi.
+
+---
+
 ## Aage jo bhi file banegi, uska explanation yahin niche add hoga.
