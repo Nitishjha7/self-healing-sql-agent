@@ -80,4 +80,36 @@ generate_sql → execute_sql → (conditional: retry → generate_sql | give_up/
 
 ---
 
+---
+
+## backend/app/main.py
+
+FastAPI app ka entrypoint — HTTP layer, koi agent logic nahi yahan.
+
+- **`@app.on_event("startup")` → `init_db()`**: container start hote hi table create/seed ho jaati hai, alag se manual step nahi karna padta.
+- **`GET /health`**: Docker healthcheck / uptime check ke liye simple ping endpoint.
+- **`POST /query`**: Frontend yahi call karega. Body me `{"question": "..."}` bhejna hoga, response me `sql_query`, `final_answer`, `logs` (poora trace), aur `retry_count` milega — UI ko yehi sab dikhana hai transparency ke liye.
+- **CORS `allow_origins=["*"]`**: Abhi dev ke liye open rakha hai taaki React (alag port/container) se backend ko call kiya ja sake bina CORS error ke. Production me isko specific frontend domain tak restrict karna chahiye — abhi ke liye note kar liya, baad me tighten karenge.
+- **Pydantic models (`QueryRequest`, `QueryResponse`)**: Request/response ka shape enforce karte hain — FastAPI inse automatically validation + `/docs` (Swagger UI) bana deta hai.
+
+---
+
+## backend/Dockerfile
+
+Standard multi-line Python container build:
+1. `python:3.11-slim` base (halka image, poora Python nahi, sirf zaroori)
+2. `requirements.txt` pehle copy karke install karte hain (Docker layer caching ke liye — agar code badle but requirements na badle, install step dobara nahi chalega)
+3. Phir `app/` code copy karte hain
+4. `uvicorn` se app run karte hain port 8000 pe
+
+## .env.example
+
+Actual secrets (`.env`) `.gitignore` me hai isliye commit nahi hoga. Ye `.env.example` file sirf **template** hai — batata hai konse env vars chahiye (`DATABASE_URL`, `GOOGLE_API_KEY` etc.) bina real values leak kiye. Isko copy karke `.env` banana hoga aur apni Gemini API key daalni hogi.
+
+## docker-compose.yml fix
+
+Pehle `GROQ_API_KEY` reh gaya tha jab hum Groq use karne wale the — Gemini pe switch karne ke baad ise `GOOGLE_API_KEY` kar diya taaki backend container ko sahi env var mile.
+
+---
+
 ## Aage jo bhi file banegi, uska explanation yahin niche add hoga.
