@@ -1,0 +1,122 @@
+[
+  {
+    "id": 1,
+    "question": "How many employees are there in total?",
+    "gold_sql": "SELECT COUNT(*) FROM employees",
+    "tags": ["single-table", "aggregate"]
+  },
+  {
+    "id": 2,
+    "question": "What is the average salary across the company?",
+    "gold_sql": "SELECT AVG(salary) FROM employees",
+    "tags": ["single-table", "aggregate"]
+  },
+  {
+    "id": 3,
+    "question": "Who is the highest paid employee?",
+    "gold_sql": "SELECT name FROM employees ORDER BY salary DESC LIMIT 1",
+    "tags": ["single-table", "order-limit"]
+  },
+  {
+    "id": 4,
+    "question": "List all departments and their locations.",
+    "gold_sql": "SELECT name, location FROM departments",
+    "tags": ["single-table"]
+  },
+  {
+    "id": 5,
+    "question": "Which department has the largest budget?",
+    "gold_sql": "SELECT name FROM departments ORDER BY budget DESC LIMIT 1",
+    "tags": ["single-table", "order-limit"]
+  },
+  {
+    "id": 6,
+    "question": "Who earns more than 80000 in Engineering?",
+    "gold_sql": "SELECT e.name FROM employees e JOIN departments d ON e.department_id = d.id WHERE d.name = 'Engineering' AND e.salary > 80000",
+    "tags": ["join", "filter"]
+  },
+  {
+    "id": 7,
+    "question": "Who works in Bangalore?",
+    "gold_sql": "SELECT e.name FROM employees e JOIN departments d ON e.department_id = d.id WHERE d.location = 'Bangalore'",
+    "tags": ["join", "filter"]
+  },
+  {
+    "id": 8,
+    "question": "Which department has the highest average salary?",
+    "gold_sql": "SELECT d.name FROM departments d JOIN employees e ON e.department_id = d.id GROUP BY d.id, d.name ORDER BY AVG(e.salary) DESC LIMIT 1",
+    "tags": ["join", "group-by", "order-limit"]
+  },
+  {
+    "id": 9,
+    "question": "How many employees are in each department?",
+    "gold_sql": "SELECT d.name, COUNT(e.id) FROM departments d JOIN employees e ON e.department_id = d.id GROUP BY d.id, d.name",
+    "tags": ["join", "group-by"]
+  },
+  {
+    "id": 10,
+    "question": "What is the total salary cost of the Engineering department?",
+    "gold_sql": "SELECT SUM(e.salary) FROM employees e JOIN departments d ON e.department_id = d.id WHERE d.name = 'Engineering'",
+    "tags": ["join", "aggregate"]
+  },
+  {
+    "id": 11,
+    "question": "What is the average salary of employees based in Mumbai?",
+    "gold_sql": "SELECT AVG(e.salary) FROM employees e JOIN departments d ON e.department_id = d.id WHERE d.location = 'Mumbai'",
+    "tags": ["join", "aggregate"]
+  },
+  {
+    "id": 12,
+    "question": "Which departments have more than two employees?",
+    "gold_sql": "SELECT d.name FROM departments d JOIN employees e ON e.department_id = d.id GROUP BY d.id, d.name HAVING COUNT(e.id) > 2",
+    "tags": ["join", "group-by", "having"]
+  },
+  {
+    "id": 13,
+    "question": "Who is the lowest paid person in Sales?",
+    "gold_sql": "SELECT e.name FROM employees e JOIN departments d ON e.department_id = d.id WHERE d.name = 'Sales' ORDER BY e.salary ASC LIMIT 1",
+    "tags": ["join", "order-limit"]
+  },
+  {
+    "id": 14,
+    "question": "Which employees have a manager role?",
+    "gold_sql": "SELECT name FROM employees WHERE role LIKE '%Manager%'",
+    "tags": ["single-table", "pattern-match"]
+  },
+  {
+    "id": 15,
+    "question": "What is the difference between the highest and lowest salary in the company?",
+    "gold_sql": "SELECT MAX(salary) - MIN(salary) FROM employees",
+    "tags": ["single-table", "aggregate"]
+  },
+  {
+    "id": 16,
+    "question": "Which employees earn above the company average salary?",
+    "gold_sql": "SELECT name FROM employees WHERE salary > (SELECT AVG(salary) FROM employees)",
+    "tags": ["single-table", "subquery"]
+  },
+  {
+    "id": 17,
+    "question": "Which city has the most employees?",
+    "gold_sql": "SELECT d.location FROM departments d JOIN employees e ON e.department_id = d.id GROUP BY d.location ORDER BY COUNT(e.id) DESC LIMIT 1",
+    "tags": ["join", "group-by", "order-limit"]
+  },
+  {
+    "id": 18,
+    "question": "For each department, what percentage of its budget goes to salaries?",
+    "gold_sql": "SELECT d.name, ROUND(SUM(e.salary) * 100.0 / d.budget, 2) FROM departments d JOIN employees e ON e.department_id = d.id GROUP BY d.id, d.name, d.budget",
+    "tags": ["join", "group-by", "arithmetic", "hard"]
+  },
+  {
+    "id": 19,
+    "question": "List every employee with their department name and salary.",
+    "gold_sql": "SELECT e.name, d.name, e.salary FROM employees e JOIN departments d ON e.department_id = d.id",
+    "tags": ["join", "multi-column"]
+  },
+  {
+    "id": 20,
+    "question": "Which department has the lowest total salary spend?",
+    "gold_sql": "SELECT d.name FROM departments d JOIN employees e ON e.department_id = d.id GROUP BY d.id, d.name ORDER BY SUM(e.salary) ASC LIMIT 1",
+    "tags": ["join", "group-by", "order-limit"]
+  }
+]

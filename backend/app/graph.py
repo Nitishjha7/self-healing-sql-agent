@@ -8,7 +8,9 @@ from langgraph.graph import END, StateGraph
 
 from app.db import get_schema_description, run_sql
 
-MAX_RETRIES = 3
+# Env se override ho sakta hai — eval harness isko 0 set karke measure karta hai
+# ki self-healing loop ke bina accuracy kitni girti hai.
+MAX_RETRIES = int(os.environ.get("MAX_RETRIES", "3"))
 
 # Env se override ho sakta hai — model versions deprecate hote rehte hain,
 # aur eval me alag models compare karne ke liye bhi kaam aata hai.
