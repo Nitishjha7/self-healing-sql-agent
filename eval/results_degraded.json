@@ -1,0 +1,558 @@
+[
+  {
+    "max_retries": 0,
+    "passed": 18,
+    "strict_passed": 16,
+    "total": 20,
+    "accuracy": 0.9,
+    "strict_accuracy": 0.8,
+    "avg_retries": 0.0,
+    "healed_count": 0,
+    "healed_ids": [],
+    "results": [
+      {
+        "id": 1,
+        "question": "How many employees are there in total?",
+        "tags": [
+          "single-table",
+          "aggregate"
+        ],
+        "correct": true,
+        "strict_correct": true,
+        "retry_count": 0,
+        "agent_sql": "SELECT count(*) FROM employees",
+        "error": null
+      },
+      {
+        "id": 2,
+        "question": "What is the average salary across the company?",
+        "tags": [
+          "single-table",
+          "aggregate"
+        ],
+        "correct": true,
+        "strict_correct": true,
+        "retry_count": 0,
+        "agent_sql": "SELECT AVG(salary) FROM employees",
+        "error": null
+      },
+      {
+        "id": 3,
+        "question": "Who is the highest paid employee?",
+        "tags": [
+          "single-table",
+          "order-limit"
+        ],
+        "correct": true,
+        "strict_correct": true,
+        "retry_count": 0,
+        "agent_sql": "SELECT name FROM employees ORDER BY salary DESC LIMIT 1",
+        "error": null
+      },
+      {
+        "id": 4,
+        "question": "List all departments and their locations.",
+        "tags": [
+          "single-table"
+        ],
+        "correct": true,
+        "strict_correct": true,
+        "retry_count": 0,
+        "agent_sql": "SELECT name, location FROM departments",
+        "error": null
+      },
+      {
+        "id": 5,
+        "question": "Which department has the largest budget?",
+        "tags": [
+          "single-table",
+          "order-limit"
+        ],
+        "correct": true,
+        "strict_correct": true,
+        "retry_count": 0,
+        "agent_sql": "SELECT name FROM departments ORDER BY budget DESC LIMIT 1",
+        "error": null
+      },
+      {
+        "id": 6,
+        "question": "Who earns more than 80000 in Engineering?",
+        "tags": [
+          "join",
+          "filter"
+        ],
+        "correct": true,
+        "strict_correct": true,
+        "retry_count": 0,
+        "agent_sql": "SELECT e.name \nFROM employees e \nJOIN departments d ON e.department_id = d.id \nWHERE d.name = 'Engineering' AND e.salary > 80000",
+        "error": null
+      },
+      {
+        "id": 7,
+        "question": "Who works in Bangalore?",
+        "tags": [
+          "join",
+          "filter"
+        ],
+        "correct": true,
+        "strict_correct": true,
+        "retry_count": 0,
+        "agent_sql": "SELECT e.name \nFROM employees e \nJOIN departments d ON e.department_id = d.id \nWHERE d.location = 'Bangalore'",
+        "error": null
+      },
+      {
+        "id": 8,
+        "question": "Which department has the highest average salary?",
+        "tags": [
+          "join",
+          "group-by",
+          "order-limit"
+        ],
+        "correct": true,
+        "strict_correct": true,
+        "retry_count": 0,
+        "agent_sql": "SELECT d.name \nFROM departments d\nJOIN employees e ON d.id = e.department_id\nGROUP BY d.id, d.name\nORDER BY AVG(e.salary) DESC\nLIMIT 1",
+        "error": null
+      },
+      {
+        "id": 9,
+        "question": "How many employees are in each department?",
+        "tags": [
+          "join",
+          "group-by"
+        ],
+        "correct": true,
+        "strict_correct": true,
+        "retry_count": 0,
+        "agent_sql": "SELECT d.name, COUNT(e.id) AS employee_count\nFROM departments d\nLEFT JOIN employees e ON d.id = e.department_id\nGROUP BY d.id, d.name",
+        "error": null
+      },
+      {
+        "id": 10,
+        "question": "What is the total salary cost of the Engineering department?",
+        "tags": [
+          "join",
+          "aggregate"
+        ],
+        "correct": true,
+        "strict_correct": true,
+        "retry_count": 0,
+        "agent_sql": "SELECT SUM(e.salary) FROM employees e JOIN departments d ON e.department_id = d.id WHERE d.name = 'Engineering'",
+        "error": null
+      },
+      {
+        "id": 11,
+        "question": "What is the average salary of employees based in Mumbai?",
+        "tags": [
+          "join",
+          "aggregate"
+        ],
+        "correct": true,
+        "strict_correct": true,
+        "retry_count": 0,
+        "agent_sql": "SELECT AVG(e.salary)\nFROM employees e\nJOIN departments d ON e.department_id = d.id\nWHERE d.location = 'Mumbai'",
+        "error": null
+      },
+      {
+        "id": 12,
+        "question": "Which departments have more than two employees?",
+        "tags": [
+          "join",
+          "group-by",
+          "having"
+        ],
+        "correct": true,
+        "strict_correct": true,
+        "retry_count": 0,
+        "agent_sql": "SELECT d.name \nFROM departments d \nJOIN employees e ON d.id = e.department_id \nGROUP BY d.id, d.name \nHAVING COUNT(e.id) > 2",
+        "error": null
+      },
+      {
+        "id": 13,
+        "question": "Who is the lowest paid person in Sales?",
+        "tags": [
+          "join",
+          "order-limit"
+        ],
+        "correct": true,
+        "strict_correct": true,
+        "retry_count": 0,
+        "agent_sql": "SELECT e.name \nFROM employees e \nJOIN departments d ON e.department_id = d.id \nWHERE d.name = 'Sales' \nORDER BY e.salary ASC \nLIMIT 1",
+        "error": null
+      },
+      {
+        "id": 14,
+        "question": "Which employees have a manager role?",
+        "tags": [
+          "single-table",
+          "pattern-match"
+        ],
+        "correct": false,
+        "strict_correct": false,
+        "retry_count": 0,
+        "agent_sql": "SELECT id, name, department_id, salary, role\nFROM employees\nWHERE role = 'manager'",
+        "error": null
+      },
+      {
+        "id": 15,
+        "question": "What is the difference between the highest and lowest salary in the company?",
+        "tags": [
+          "single-table",
+          "aggregate"
+        ],
+        "correct": true,
+        "strict_correct": true,
+        "retry_count": 0,
+        "agent_sql": "SELECT MAX(salary) - MIN(salary) AS salary_difference\nFROM employees",
+        "error": null
+      },
+      {
+        "id": 16,
+        "question": "Which employees earn above the company average salary?",
+        "tags": [
+          "single-table",
+          "subquery"
+        ],
+        "correct": true,
+        "strict_correct": false,
+        "retry_count": 0,
+        "agent_sql": "SELECT id, name, department_id, salary, role\nFROM employees\nWHERE salary > (SELECT AVG(salary) FROM employees)",
+        "error": null
+      },
+      {
+        "id": 17,
+        "question": "Which city has the most employees?",
+        "tags": [
+          "join",
+          "group-by",
+          "order-limit"
+        ],
+        "correct": true,
+        "strict_correct": true,
+        "retry_count": 0,
+        "agent_sql": "SELECT d.location\nFROM employees e\nJOIN departments d ON e.department_id = d.id\nGROUP BY d.location\nORDER BY COUNT(e.id) DESC\nLIMIT 1",
+        "error": null
+      },
+      {
+        "id": 18,
+        "question": "For each department, what percentage of its budget goes to salaries?",
+        "tags": [
+          "join",
+          "group-by",
+          "arithmetic",
+          "hard"
+        ],
+        "correct": false,
+        "strict_correct": false,
+        "retry_count": 0,
+        "agent_sql": "SELECT \n    d.name AS department_name,\n    COALESCE(SUM(e.salary), 0) / NULLIF(d.budget, 0) * 100 AS salary_percentage\nFROM \n    departments d\nLEFT JOIN \n    employees e ON d.id = e.department_id\nGROUP BY \n    d.id, d.name, d.budget",
+        "error": null
+      },
+      {
+        "id": 19,
+        "question": "List every employee with their department name and salary.",
+        "tags": [
+          "join",
+          "multi-column"
+        ],
+        "correct": true,
+        "strict_correct": false,
+        "retry_count": 0,
+        "agent_sql": "SELECT \n    e.name AS employee_name,\n    d.name AS department_name,\n    e.salary\nFROM \n    employees e\nJOIN \n    departments d ON e.department_id = d.id",
+        "error": null
+      },
+      {
+        "id": 20,
+        "question": "Which department has the lowest total salary spend?",
+        "tags": [
+          "join",
+          "group-by",
+          "order-limit"
+        ],
+        "correct": true,
+        "strict_correct": true,
+        "retry_count": 0,
+        "agent_sql": "SELECT d.name \nFROM departments d\nJOIN employees e ON d.id = e.department_id\nGROUP BY d.id, d.name\nORDER BY SUM(e.salary) ASC\nLIMIT 1",
+        "error": null
+      }
+    ]
+  },
+  {
+    "max_retries": 3,
+    "passed": 18,
+    "strict_passed": 16,
+    "total": 20,
+    "accuracy": 0.9,
+    "strict_accuracy": 0.8,
+    "avg_retries": 0.05,
+    "healed_count": 0,
+    "healed_ids": [],
+    "results": [
+      {
+        "id": 1,
+        "question": "How many employees are there in total?",
+        "tags": [
+          "single-table",
+          "aggregate"
+        ],
+        "correct": true,
+        "strict_correct": true,
+        "retry_count": 0,
+        "agent_sql": "SELECT count(*) FROM employees",
+        "error": null
+      },
+      {
+        "id": 2,
+        "question": "What is the average salary across the company?",
+        "tags": [
+          "single-table",
+          "aggregate"
+        ],
+        "correct": true,
+        "strict_correct": true,
+        "retry_count": 0,
+        "agent_sql": "SELECT AVG(salary) FROM employees",
+        "error": null
+      },
+      {
+        "id": 3,
+        "question": "Who is the highest paid employee?",
+        "tags": [
+          "single-table",
+          "order-limit"
+        ],
+        "correct": true,
+        "strict_correct": true,
+        "retry_count": 0,
+        "agent_sql": "SELECT name FROM employees ORDER BY salary DESC LIMIT 1",
+        "error": null
+      },
+      {
+        "id": 4,
+        "question": "List all departments and their locations.",
+        "tags": [
+          "single-table"
+        ],
+        "correct": true,
+        "strict_correct": true,
+        "retry_count": 0,
+        "agent_sql": "SELECT name, location FROM departments",
+        "error": null
+      },
+      {
+        "id": 5,
+        "question": "Which department has the largest budget?",
+        "tags": [
+          "single-table",
+          "order-limit"
+        ],
+        "correct": true,
+        "strict_correct": true,
+        "retry_count": 0,
+        "agent_sql": "SELECT name \nFROM departments \nORDER BY budget DESC \nLIMIT 1",
+        "error": null
+      },
+      {
+        "id": 6,
+        "question": "Who earns more than 80000 in Engineering?",
+        "tags": [
+          "join",
+          "filter"
+        ],
+        "correct": true,
+        "strict_correct": true,
+        "retry_count": 0,
+        "agent_sql": "SELECT e.name \nFROM employees e\nJOIN departments d ON e.department_id = d.id \nWHERE d.name = 'Engineering' AND e.salary > 80000",
+        "error": null
+      },
+      {
+        "id": 7,
+        "question": "Who works in Bangalore?",
+        "tags": [
+          "join",
+          "filter"
+        ],
+        "correct": true,
+        "strict_correct": true,
+        "retry_count": 0,
+        "agent_sql": "SELECT e.name \nFROM employees e \nJOIN departments d ON e.department_id = d.id \nWHERE d.location = 'Bangalore'",
+        "error": null
+      },
+      {
+        "id": 8,
+        "question": "Which department has the highest average salary?",
+        "tags": [
+          "join",
+          "group-by",
+          "order-limit"
+        ],
+        "correct": true,
+        "strict_correct": true,
+        "retry_count": 0,
+        "agent_sql": "SELECT d.name \nFROM departments d\nJOIN employees e ON d.id = e.department_id\nGROUP BY d.id, d.name\nORDER BY AVG(e.salary) DESC\nLIMIT 1",
+        "error": null
+      },
+      {
+        "id": 9,
+        "question": "How many employees are in each department?",
+        "tags": [
+          "join",
+          "group-by"
+        ],
+        "correct": true,
+        "strict_correct": true,
+        "retry_count": 0,
+        "agent_sql": "SELECT d.name AS department_name, COUNT(e.id) AS employee_count\nFROM departments d\nLEFT JOIN employees e ON d.id = e.department_id\nGROUP BY d.id, d.name",
+        "error": null
+      },
+      {
+        "id": 10,
+        "question": "What is the total salary cost of the Engineering department?",
+        "tags": [
+          "join",
+          "aggregate"
+        ],
+        "correct": true,
+        "strict_correct": true,
+        "retry_count": 0,
+        "agent_sql": "SELECT sum(e.salary) FROM employees e JOIN departments d ON e.department_id = d.id WHERE d.name = 'Engineering'",
+        "error": null
+      },
+      {
+        "id": 11,
+        "question": "What is the average salary of employees based in Mumbai?",
+        "tags": [
+          "join",
+          "aggregate"
+        ],
+        "correct": true,
+        "strict_correct": true,
+        "retry_count": 0,
+        "agent_sql": "SELECT avg(T1.salary) FROM employees AS T1 INNER JOIN departments AS T2 ON T1.department_id = T2.id WHERE T2.location = 'Mumbai'",
+        "error": null
+      },
+      {
+        "id": 12,
+        "question": "Which departments have more than two employees?",
+        "tags": [
+          "join",
+          "group-by",
+          "having"
+        ],
+        "correct": true,
+        "strict_correct": true,
+        "retry_count": 0,
+        "agent_sql": "SELECT d.name \nFROM departments d\nJOIN employees e ON d.id = e.department_id\nGROUP BY d.id, d.name\nHAVING COUNT(e.id) > 2",
+        "error": null
+      },
+      {
+        "id": 13,
+        "question": "Who is the lowest paid person in Sales?",
+        "tags": [
+          "join",
+          "order-limit"
+        ],
+        "correct": true,
+        "strict_correct": true,
+        "retry_count": 0,
+        "agent_sql": "SELECT e.name \nFROM employees e \nJOIN departments d ON e.department_id = d.id \nWHERE d.name = 'Sales' \nORDER BY e.salary ASC \nLIMIT 1",
+        "error": null
+      },
+      {
+        "id": 14,
+        "question": "Which employees have a manager role?",
+        "tags": [
+          "single-table",
+          "pattern-match"
+        ],
+        "correct": false,
+        "strict_correct": false,
+        "retry_count": 0,
+        "agent_sql": "SELECT id, name, department_id, salary, role\nFROM employees\nWHERE role = 'manager'",
+        "error": null
+      },
+      {
+        "id": 15,
+        "question": "What is the difference between the highest and lowest salary in the company?",
+        "tags": [
+          "single-table",
+          "aggregate"
+        ],
+        "correct": true,
+        "strict_correct": true,
+        "retry_count": 0,
+        "agent_sql": "SELECT MAX(salary) - MIN(salary) AS salary_difference\nFROM employees",
+        "error": null
+      },
+      {
+        "id": 16,
+        "question": "Which employees earn above the company average salary?",
+        "tags": [
+          "single-table",
+          "subquery"
+        ],
+        "correct": true,
+        "strict_correct": false,
+        "retry_count": 0,
+        "agent_sql": "SELECT id, name, department_id, salary, role\nFROM employees\nWHERE salary > (SELECT AVG(salary) FROM employees)",
+        "error": null
+      },
+      {
+        "id": 17,
+        "question": "Which city has the most employees?",
+        "tags": [
+          "join",
+          "group-by",
+          "order-limit"
+        ],
+        "correct": true,
+        "strict_correct": true,
+        "retry_count": 0,
+        "agent_sql": "SELECT d.location\nFROM employees e\nJOIN departments d ON e.department_id = d.id\nGROUP BY d.location\nORDER BY count(e.id) DESC\nLIMIT 1",
+        "error": null
+      },
+      {
+        "id": 18,
+        "question": "For each department, what percentage of its budget goes to salaries?",
+        "tags": [
+          "join",
+          "group-by",
+          "arithmetic",
+          "hard"
+        ],
+        "correct": false,
+        "strict_correct": false,
+        "retry_count": 1,
+        "agent_sql": "SELECT \n    d.name AS department_name,\n    COALESCE(SUM(e.salary), 0) / NULLIF(d.budget, 0) * 100 AS salary_budget_percentage\nFROM \n    departments d\nLEFT JOIN \n    employees e ON d.id = e.department_id\nGROUP BY \n    d.id, d.name, d.budget",
+        "error": null
+      },
+      {
+        "id": 19,
+        "question": "List every employee with their department name and salary.",
+        "tags": [
+          "join",
+          "multi-column"
+        ],
+        "correct": true,
+        "strict_correct": false,
+        "retry_count": 0,
+        "agent_sql": "SELECT \n    e.name AS employee_name, \n    d.name AS department_name, \n    e.salary \nFROM \n    employees e\nJOIN \n    departments d ON e.department_id = d.id",
+        "error": null
+      },
+      {
+        "id": 20,
+        "question": "Which department has the lowest total salary spend?",
+        "tags": [
+          "join",
+          "group-by",
+          "order-limit"
+        ],
+        "correct": true,
+        "strict_correct": true,
+        "retry_count": 0,
+        "agent_sql": "SELECT d.name\nFROM departments d\nJOIN employees e ON d.id = e.department_id\nGROUP BY d.id, d.name\nORDER BY SUM(e.salary) ASC\nLIMIT 1",
+        "error": null
+      }
+    ]
+  }
+]

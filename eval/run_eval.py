@@ -120,8 +120,32 @@ DEGRADED_SCHEMA = (
 )
 
 
+# A schema description that is *wrong* — column names that no longer exist.
+# This is schema drift: the docs say `emp_name` but the migration renamed it to
+# `name`. It is the single most common way a real Text-to-SQL deployment breaks,
+# and unlike the degraded case it produces genuine execution errors rather than
+# semantically-wrong-but-valid SQL. Postgres answers with
+#   column "emp_name" does not exist
+#   HINT: Perhaps you meant to reference the column "employees.name"
+# which is exactly the feedback the retry prompt is designed to consume. This is
+# the condition that actually tests the self-healing loop.
+STALE_SCHEMA = (
+    "Table: departments\n"
+    "Columns: id, dept_name, budget, city\n"
+    "\n"
+    "Table: employees\n"
+    "Columns: id, emp_name, dept_id, salary, job_title\n"
+    "\n"
+    "Relationship: employees.dept_id -> departments.id\n"
+)
+
+
 def _degraded_schema() -> str:
     return DEGRADED_SCHEMA
+
+
+def _stale_schema() -> str:
+    return STALE_SCHEMA
 
 
 def _run_one(question: str, delay: float) -> dict:
@@ -218,14 +242,24 @@ def main() -> None:
         action="store_true",
         help="Strip the hand-tuned hints from the schema description, so the "
         "agent has to infer joins the way it would against a real introspected "
-        "schema. This is the run where the self-healing loop actually matters.",
+        "schema.",
+    )
+    parser.add_argument(
+        "--stale-schema",
+        action="store_true",
+        help="Describe the schema with column names that no longer exist (schema "
+        "drift). Induces genuine Postgres errors, so this is the run that actually "
+        "exercises the self-healing loop. Takes precedence over --degrade-schema.",
     )
     args = parser.parse_args()
 
     init_db()
 
-    if args.degrade_schema:
-        # graph.py imported the function by name, so patch it on graph, not db.
+    # graph.py imported the function by name, so patch it on graph, not db.
+    if args.stale_schema:
+        graph_mod.get_schema_description = _stale_schema
+        print("Schema: STALE (wrong column names — induces real execution errors)")
+    elif args.degrade_schema:
         graph_mod.get_schema_description = _degraded_schema
         print("Schema: DEGRADED (no relationship hints, no example values)")
     questions = json.loads(QUESTIONS_PATH.read_text(encoding="utf-8"))
