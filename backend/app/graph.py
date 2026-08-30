@@ -10,6 +10,10 @@ from app.db import get_schema_description, run_sql
 
 MAX_RETRIES = 3
 
+# Env se override ho sakta hai — model versions deprecate hote rehte hain,
+# aur eval me alag models compare karne ke liye bhi kaam aata hai.
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.6-flash")
+
 BLOCKED_KEYWORDS = ("DROP", "DELETE", "UPDATE", "INSERT", "ALTER", "TRUNCATE")
 
 
@@ -25,7 +29,7 @@ class AgentState(TypedDict):
 
 def _llm() -> ChatGoogleGenerativeAI:
     return ChatGoogleGenerativeAI(
-        model="gemini-2.0-flash",
+        model=GEMINI_MODEL,
         google_api_key=os.environ["GOOGLE_API_KEY"],
         temperature=0,
     )

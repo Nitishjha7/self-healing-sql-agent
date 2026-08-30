@@ -104,7 +104,7 @@ LangGraph StateGraph  (AgentState threaded through every node)
                     |
                     v
               PostgreSQL 16
-           (employees table, seeded)
+     departments <--FK-- employees  (seeded)
 ```
 
 **Interview me kyun matter karta hai:** ye dikhata hai ki main orchestration layer (LangGraph), data layer (Postgres/SQLAlchemy), aur API layer (FastAPI) ko alag rakh sakta hoon, aur unko *conditional* control flow se wire kar sakta hoon — linear pipeline se nahi.
@@ -182,6 +182,9 @@ Ye section hi is doc ka core hai. Har row: kya kiya, kyun kiya, kya cost hai.
 | Decision | Defence | Cost / Trade-off |
 |---|---|---|
 | **PostgreSQL, SQLite nahi** | SQLite ka type affinity itna permissive hai ki bahut saari *galat* queries bhi success ho jaati hain — matlab self-healing loop ko wo errors milte hi nahi jinke liye wo bana hai. Postgres ka strict typing aur precise error messages (`column "salery" does not exist`) exactly wahi high-quality feedback signal dete hain jispe retry prompt depend karta hai. Aur production me Postgres hi hoga. | Ek aur container, ek aur moving piece — SQLite file-based hota, zero setup. Demo ke liye Docker Compose ne ye cost absorb kar li. |
+| **Do tables FK ke saath, ek flat table nahi** | Flat table pe har question ek single-table `WHERE` filter ban jaata tha — model wo lagbhag hamesha pehli baar me sahi kar leta hai, matlab **self-healing loop ko heal karne ke liye kuch milta hi nahi tha**, aur project ka core USP demo me trigger hi nahi hota. FK ke saath model ko join infer karna padta hai, aur join galat karna real Text-to-SQL ka sabse common failure hai — wahi precise Postgres error deta hai jo retry prompt consume karta hai. | Do tables abhi bhi chhota hai. 50-table schema pe description prompt me fit nahi hogi — wahan schema retrieval chahiye. |
+| **Schema description me "join mandatory hai" explicitly likha** | Sirf columns list karne se model guess karta hai ki shayad `employees` me department name bhi hoga. Explicitly likhna ki wo column exist hi nahi karta, ek poori class ke hallucinated queries rok deta hai. Description me example values aur relationship line bhi hai — ye teeno cheezein raw DDL introspection se nahi milti. | Schema badle toh description manually update karni padegi. |
+| **Purane schema ka auto-rebuild (`_needs_rebuild`)** | Data sirf seed hai, toh drop-and-rebuild safe hai — aur isse existing Docker volume pe bhi `docker compose up` bina manual step ke chalta hai. Demo reproducible rehna chahiye. | Ye production migration strategy nahi hai — wahan Alembic hoti. Docs me explicitly aisa likha bhi hai. |
 | **SQLAlchemy Core (`text()`), ORM models nahi** | Agent khud dynamic SQL likhta hai — mujhe fixed declarative models ki zaroorat hi nahi, sirf raw execution aur connection pooling chahiye. ORM yahan pure overhead hota. | Type safety nahi milti — lekin queries LLM generate kar raha hai, compile-time pe wo waise bhi nahi pata hoti. |
 | **`pool_pre_ping=True`** | Container restart ya idle timeout ke baad stale connection pe pehli query fail hoti hai. Pre-ping wo silently handle kar leta hai. Ye chhota sa flag production-awareness dikhata hai. | Har checkout pe ek chhoti round-trip. |
 | **Startup pe seed data** | Demo reproducible hona chahiye — clone karo, `docker compose up`, turant query kar sako. Manual migration step demo ko tod deta hai. | Seed idempotent hai (`COUNT(*) == 0` check), lekin ye production migration strategy nahi hai — production me Alembic hoga. |
@@ -204,9 +207,8 @@ Ye section hi is doc ka core hai. Har row: kya kiya, kyun kiya, kya cost hai.
 
 **Ye khud se bolna** — isse maturity dikhti hai. Interviewer ko dhundhne mat do.
 
-### Limitation 1 — Single flat table
-Abhi sirf `employees` table hai, toh JOIN complexity ka koi test nahi hua. Real Text-to-SQL ki difficulty multi-table joins me hai, single-table filters me nahi.
-**Mitigation:** roadmap ka #1 item — `departments` table with FK. **Ye honestly bolna, chhupana nahi.**
+### ~~Limitation 1 — Single flat table~~ ✅ FIXED
+Ab `departments` + `employees` FK ke saath hai, toh model ko join infer karna padta hai. **Lekin honest scope bata dena:** do tables hain, twenty nahi. Real enterprise schema me 50+ tables hote hain jahan sirf schema description prompt me fit hi nahi hoti — wahan schema retrieval (sirf relevant tables select karna) chahiye. Do tables join reasoning prove karte hain, schema *scale* nahi.
 
 ### Limitation 2 — Koi measured accuracy nahi
 Abhi tak "kitne % questions sahi answer hue" ka koi number nahi hai.
@@ -352,12 +354,12 @@ Ye answer bahut strong hai — ye ek portfolio ko ek *coherent skill story* me b
 Interviewer ko **self-healing hote hue dikhna** chahiye, sirf ek chat box nahi.
 
 ### Scenario 1 — Happy Path
-"Who earns more than 80000 in Engineering?"
+"Who earns more than 80000 in Engineering?" (ab ye bhi ek join hai — Engineering `departments` pe hai)
 Flow: `generate_sql` → `execute_sql` (success) → `synthesize`. `retry_count: 0`.
 **Talking point:** "Simple case, zero retries — self-healing sirf zaroorat pe fire hota hai, har query pe overhead nahi."
 
 ### Scenario 2 — The Correction Path (asli USP)
-Aisa question do jo model ko galat column guess karne pe majboor kare — jaise ek aisa concept jo schema me alag naam se hai ("who has been here the longest" jab `join_date` column exist hi nahi karta), ya deliberately schema description me se ek column ka semantic hint hata do.
+Ab FK schema ke saath ye naturally trigger hota hai. Aisa question do jo join force kare aur model ko flat-table assumption pe le jaye — "Which department has the highest average salary?" ya "Who works in Bangalore?". Agar model `employees.department` ya `e.location` maan le (jo exist hi nahi karta), Postgres exact error deta hai — `column e.department does not exist` — aur wo error retry prompt me jaata hai.
 Flow: `generate_sql` → `execute_sql` **fail** → logs me `column "..." does not exist` → `Retry 1` → corrected SQL → success.
 **Talking point:** "Agent ne error khud padha, kya galat tha wo samjha, aur query fix ki — main ne kuch nahi bola. Ye retry nahi, repair hai."
 
@@ -414,7 +416,7 @@ Interview me overclaim karna sabse bada risk hai. Agar interviewer code khol le 
 | ❌ Mat bolna | ✅ Bolna |
 |---|---|
 | "Guardrails AI se output validate karta hai" | "Safety abhi prompt-level hai; deterministic Guardrails validator next step hai" |
-| "Complex joins handle karta hai" | "Abhi single table hai — multi-table schema roadmap ka pehla item hai, kyunki JOIN complexity hi asli test hai" |
+| "Bade production schemas handle kar leta hai" | "Do tables hain FK ke saath, toh join reasoning test hota hai — lekin 50-table schema pe description prompt me fit hi nahi hogi, wahan schema retrieval chahiye. Ye join *reasoning* prove karta hai, schema *scale* nahi" |
 | "Accuracy X% hai" | "Abhi measure nahi kiya — eval harness bana raha hoon jo retry ke saath vs bina retry accuracy compare karega" |
 | "React UI hai" | "Backend complete hai, UI abhi banni hai — demo abhi Swagger se hota hai" |
 | "Production ready hai" | "Portfolio project hai; production ke liye read-only DB role, CORS tightening, aur eval chahiye" |

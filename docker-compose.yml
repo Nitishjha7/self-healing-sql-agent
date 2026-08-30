@@ -25,12 +25,14 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD:-agent}@db:5432/${POSTGRES_DB:-employees}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.6-flash}
       # LangSmith tracing — defaults to off, so the stack runs without a key.
       LANGCHAIN_TRACING_V2: ${LANGCHAIN_TRACING_V2:-false}
       LANGCHAIN_API_KEY: ${LANGCHAIN_API_KEY:-}
       LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-self-healing-sql-agent}
     ports:
-      - "8000:8000"
+      # Host port override-able — dusre projects bhi 8000 use karte hain.
+      - "${BACKEND_PORT:-8000}:8000"
 
   frontend:
     build: ./frontend
