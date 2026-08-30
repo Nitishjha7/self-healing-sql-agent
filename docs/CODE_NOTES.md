@@ -229,3 +229,42 @@ Default khaali hai — Docker setup me nginx same origin pe `/api` proxy karta h
 **Dhyan rakhna:** ye **build-time** variable hai, runtime nahi — Vite ise bundle me bake kar deta hai. Cloudflare Pages pe value badalne ke baad **redeploy karna zaroori hai**, warna purani value chalti rahegi. Ye ek common gotcha hai.
 
 **429 handling:** frontend `res.status === 429` alag se pakadta hai aur backend ka `detail` message dikhata hai — kyunki throttle hona ek normal, samjhane wali state hai, generic error nahi.
+
+---
+
+## Dockerfile (root) — single-service deployment image
+
+**Kya karta hai:** Do-stage build. Stage 1 me Node React app build karta hai; stage 2 me Python image banti hai aur built files `static/` me copy ho jaati hain. FastAPI dono serve karta hai — API bhi, UI bhi.
+
+**`backend/Dockerfile` se alag kyun:** wo local `docker-compose` ke liye hai jahan nginx alag se frontend serve karta hai. Ye root wala deployment ke liye hai. Dono rehne dene ka reason: local dev me nginx wala setup production-jaisa reverse proxy dikhata hai, aur deploy pe ek service rakhna simplest hai.
+
+**Ek service kyun, do nahi:**
+- Render free tier pe ek web service milti hai, aur split deploy me **dono** ko warm rakhna padta
+- Same origin matlab **CORS ki zaroorat hi nahi** — ek poori class ki configuration aur uske bugs khatam
+- Frontend ka backend URL build-time me bake karne ka jhanjhat nahi (`VITE_API_BASE` khaali rehta hai)
+
+**`CMD` shell form me kyun:** Render (aur zyadatar PaaS) `$PORT` env var inject karte hain jispe bind karna hota hai. Exec form (`["uvicorn", ...]`) me `${PORT}` expand nahi hota — literal string chala jaata. Isliye `sh -c` use kiya, aur `${PORT:-8000}` default rakha taaki local `docker run` bhi chale.
+
+---
+
+## main.py — `/api` prefix aur static mount
+
+**`/api` prefix kyun:** built frontend `/` pe mount hota hai, aur wo mount uske neeche ka har path nigal leta hai. Agar API routes `/query` pe hote toh static mount ke saath collide karte. Sab kuch `/api/*` pe rakhne se dono saath rehte hain.
+
+**Mount sabse last me kyun:** FastAPI routes registration order me match karta hai. `app.mount("/")` pehle likh dete toh wo API routes ko bhi kha jaata. Isliye router include karne ke **baad** mount kiya, aur file me comment bhi likh diya taaki koi galti se upar na le jaye.
+
+**`/health` do jagah kyun:** `/api/health` frontend ke liye consistent hai, aur `/health` root pe isliye kyunki platform health checks aur uptime pingers wahi expect karte hain. Dono rate limiter se exempt.
+
+**`if STATIC_DIR.is_dir()`** — compose setup me `static/` hoti hi nahi (nginx serve karta hai). Bina is check ke app wahan crash kar jaata. Ek hi codebase dono deployment shapes support karta hai.
+
+**nginx me `proxy_pass` se trailing slash hataya** — pehle `http://backend:8000/` tha jo `/api` prefix strip kar deta tha. Ab FastAPI khud `/api` expect karta hai, toh path preserve karna zaroori hai.
+
+---
+
+## render.yaml
+
+Render Blueprint — service settings version control me rakhta hai (dashboard me manually click karne ke bajaye).
+
+**Database yahan define nahi ki** — Render ka free Postgres **30 din baad expire** ho jaata hai. Portfolio link chupchaap mar jaata aur pata bhi na chalta. Neon free tier expire nahi hota.
+
+**Secrets `sync: false`** — matlab value Render dashboard me daalni hai, YAML me nahi. Blueprint commit hota hai; usme API key likhna wahi galti hai jo `.env.example` me key daalna thi.

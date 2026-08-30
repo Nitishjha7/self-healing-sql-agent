@@ -16,9 +16,9 @@
 - ✅ Multi-table schema — `departments` + `employees` FK ke saath, JOIN questions ab possible hain
 - ✅ Evaluation harness + measured results — 3 conditions, [eval/RESULTS.md](../eval/RESULTS.md)
 - ✅ LangSmith tracing wired (opt-in env vars)
-- ❌ Guardrails AI validator node (abhi safety sirf prompt-level hai)
+- ❌ Guardrails AI validator node (optional — abhi safety prompt-level hai, docs me honestly marked)
 - ✅ Deployment guide + rate limiting + configurable CORS — [docs/DEPLOYMENT.md](DEPLOYMENT.md)
-- ❌ Actually deployed (live URL abhi nahi hai)
+- ❌ Actually deployed (live URL abhi nahi hai) — bacha hua kaam [DEPLOYMENT.md](DEPLOYMENT.md) ke top pe checklist me hai
 
 ---
 
@@ -99,9 +99,9 @@ Interview me "live URL hai" bolna bahut acha impression deta hai. Poora stack **
 
 | Piece | Kahan deploy hoga | Kyun |
 |---|---|---|
-| PostgreSQL | [Neon](https://neon.tech) ya [Supabase](https://supabase.com) | Dono ka free tier hai, serverless Postgres, koi credit card nahi chahiye |
-| Backend (FastAPI) | **[Cloud Run](https://cloud.google.com/run)** (ya HF Spaces) | 1-2s cold start, 2M req/month free. ~~Render~~ 50+ sec cold start deta hai — portfolio ke liye deal-breaker |
-| Frontend (React) | **[Cloudflare Pages](https://pages.cloudflare.com)** | Free static hosting, always-on, unlimited bandwidth, GitHub auto-deploy |
+| PostgreSQL | **[Neon](https://neon.tech)** | Free, no card. **Render ka free Postgres mat lena — 30 din baad expire ho jaata hai** aur link chupchaap mar jaayega |
+| App (UI + API, ek service) | **[Render](https://render.com)** free web service | Docker se deploy, ek hi URL. Free tier 15 min me sota hai — **UptimeRobot** har 10 min `/health` ping karke jagaye rakhta hai |
+| ~~Frontend alag~~ | — | Zaroorat nahi: FastAPI hi built React serve karta hai, toh ek hi URL aur CORS ka jhanjhat nahi |
 
 ### Deployment steps
 
@@ -139,5 +139,5 @@ Purane steps neeche reference ke liye:
 1. Multi-table schema
 2. Evaluation script
 3. Frontend chat UI
-4. Deployment (Neon + Cloud Run + Cloudflare Pages) — guide ready, [DEPLOYMENT.md](DEPLOYMENT.md)
+4. Deployment (Neon + Render, single service) — guide ready, [DEPLOYMENT.md](DEPLOYMENT.md)
 5. Har step ke baad `docs/INTERVIEW_NOTES.md` ko refresh karna — Section 8 (Limitations) aur Section 15 (Honesty Checklist) hamesha actual code se match karein

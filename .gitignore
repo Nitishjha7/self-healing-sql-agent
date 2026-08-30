@@ -1,8 +1,20 @@
+# Python
 venv/
+.venv/
 __pycache__/
 *.pyc
+
+# Node
 node_modules/
 dist/
+
+# Secrets — only .env.example is committed
 .env
+.env.local
+
+# Local databases
 *.db
+
+# Throwaway eval output (results*.json ARE committed — they're the evidence
+# eval/RESULTS.md cites)
 eval/smoke.json

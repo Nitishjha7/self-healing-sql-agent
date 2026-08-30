@@ -44,12 +44,13 @@ Honest snapshot — docs describe what exists, roadmap items are marked as such.
 - ✅ Evaluation harness — 20 questions with gold SQL, execution-accuracy metric, retries-on vs retries-off comparison ([eval/](eval/))
 - ⬜ Guardrails AI validator layer (currently prompt-level safety only)
 - ✅ React + Vite chat UI — answer bubbles, retry badge, collapsible SQL & execution trace, served by Nginx with an `/api/` proxy
-- ✅ Deployment prep — per-IP rate limiting, configurable CORS, build-time API URL, full guide in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
-- ⬜ Actually deployed (no live URL yet)
+- ✅ Deployment ready — single-service Docker image (FastAPI serves the API + built SPA on one URL), per-IP rate limiting, `render.yaml`, guide in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
+- ⬜ Actually deployed (no live URL yet) — remaining steps are checklisted at the top of [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
 
 ## Project Structure
 
 ```
+Dockerfile  Single-service deploy image (React build + FastAPI)
 backend/    FastAPI app, LangGraph agent
 frontend/   React + Vite chat UI, Nginx-served with an /api proxy
 eval/       Evaluation harness, gold questions, measured results
@@ -74,7 +75,7 @@ stale enough that queries actually fail, and contributes exactly nothing (95% �
 95%) when a well-tuned schema description means they never do. Full numbers,
 method, and the failure analysis are in [eval/RESULTS.md](eval/RESULTS.md).
 
-See [docs/SETUP.md](docs/SETUP.md) for the git/repo setup steps, and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) to put it online for free (Cloudflare Pages + Cloud Run + Neon).
+See [docs/SETUP.md](docs/SETUP.md) for the git/repo setup steps, and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) to put it online for free (single Render service + Neon Postgres).
 
 ## Roadmap
 
