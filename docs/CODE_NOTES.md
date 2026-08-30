@@ -102,6 +102,30 @@ Standard multi-line Python container build:
 3. Phir `app/` code copy karte hain
 4. `uvicorn` se app run karte hain port 8000 pe
 
+## LangSmith tracing (env vars only — koi code nahi)
+
+**Kya hai:** `LANGCHAIN_TRACING_V2=true` + `LANGCHAIN_API_KEY` + `LANGCHAIN_PROJECT` set karne se LangChain khud har LLM call ko LangSmith pe bhej deta hai — **application me ek line tracing code nahi hai.**
+
+**Kaise kaam karta hai:** LangChain ka callback system in env vars ko import time pe padhta hai aur har `ChatGoogleGenerativeAI` call ko automatically instrument kar deta hai. `.env.example` aur `docker-compose.yml` dono me default `false` hai, toh bina LangSmith account ke bhi repo normally chalta hai — zero overhead, zero behaviour change.
+
+**Kyun liya (aur `logs` array kaafi kyun nahi tha):**
+`logs` **user** ke liye hai — readable trace, API response me jaata hai, UI usko dikhati hai. Usme raw prompt nahi hota (aur hona bhi nahi chahiye — wo client tak nahi jaana chahiye).
+
+LangSmith **developer** ke liye hai. Self-healing run inherently multi-step hai — 4 tak generation calls + synthesis, aur **prompt har attempt pe badalta hai**. Jab teen retry ke baad bhi fail ho, asli sawaal ye hota hai: *"attempt 2 pe model ne exactly kya dekha, aur error message ne usko fix kyun nahi karaya?"* — `logs` ye kabhi nahi bata sakta, kyunki wo SQL aur error record karta hai, wo poora prompt nahi jisne unhe banaya.
+
+LangSmith me retry chain ek nested trace ki tarah dikhti hai: har `generate_sql` invocation, uska exact rendered prompt (injected error ke saath), `_extract_sql` se pehle ka raw response, latency, aur per-attempt token cost.
+
+**Teen cheezein jo isse debuggable ho jaati hain:**
+- **Prompt regression** — schema description edit karne se generation kharab hui? Traced prompt me diff dikh jaata hai
+- **Retry effectiveness** — attempt N+1 ne error actually incorporate kiya, ya wahi query dobara likh di?
+- **Cost/latency attribution** — slow request me kaunsa node bhaari hai, aur ek retry token me kitna mehnga padta hai
+
+**Design choice:** do observability layers rakhna deliberate hai, redundant nahi — ek product feature hai (`logs`, client tak jaata hai), doosra developer tool (LangSmith, server-side rehta hai, raw prompts carry karta hai). Isliye LangSmith opt-in hai.
+
+**Interview value:** "agent galat step le toh debug kaise karoge?" agentic AI ka sabse common production sawaal hai. Iska jawab ab "logs array hai" nahi, "LangSmith pe poori retry chain nested trace ki tarah dikhti hai, prompt-level pe" hai.
+
+---
+
 ## .env.example
 
 Actual secrets (`.env`) `.gitignore` me hai isliye commit nahi hoga. Ye `.env.example` file sirf **template** hai — batata hai konse env vars chahiye (`DATABASE_URL`, `GOOGLE_API_KEY` etc.) bina real values leak kiye. Isko copy karke `.env` banana hoga aur apni Gemini API key daalni hogi.

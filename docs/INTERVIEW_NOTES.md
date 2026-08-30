@@ -193,6 +193,7 @@ Ye section hi is doc ka core hai. Har row: kya kiya, kyun kiya, kya cost hai.
 | **`logs` API response me expose** | Explainability hi product hai. User ko dikhna chahiye ki agent ne kya socha, kya fail hua, kaise fix kiya — warna wo ek black box hai jo kabhi kabhi galat jawab deta hai. | Internal error messages client tak jaate hain. Internal demo ke liye theek; public product me logs sanitize ya gate karne padenge. |
 | **`retry_count` response me** | Ye system ki apni health metric hai — agar retries consistently high hain toh matlab prompt ya schema description improve karni hai. Demo me bhi yahi wo number hai jo self-healing *prove* karta hai. | Koi nahi. |
 | **CORS `allow_origins=["*"]`** | Local dev ke liye — frontend alag container/port pe hai. **Ye consciously known issue hai**, deploy se pehle specific origin pe tighten hoga. | Security issue agar aise hi ship ho jaye. Isliye README aur spec dono me explicitly flagged hai. |
+| **LangSmith tracing, env-var se on/off** | Do observability layers deliberate hain: `logs` **product** feature hai (API response me jaata hai, UI ki explainability), LangSmith **developer** tool hai (raw prompts, token cost, per-node latency — jo client tak kabhi nahi jaana chahiye). Application me ek line tracing code nahi hai — LangChain ka callback system env vars padh ke khud instrument karta hai. | Ek external service pe dependency. Isliye default `false` hai — bina LangSmith account ke bhi repo chalta hai, zero overhead. |
 | **Postgres ka `healthcheck` + `depends_on: service_healthy`** | Backend ko `init_db()` startup pe chalana hai — agar Postgres ready nahi hua toh crash hoga. Ye race ko deterministic banata hai. | Startup thoda slow, kyunki backend wait karta hai. Sahi trade-off. |
 | **Dockerfile me requirements pehle, code baad me** | Layer caching — code badalne pe `pip install` dobara nahi chalta. Har rebuild me minute bachte hain. | Koi nahi, ye standard practice hai. |
 | **`.env.example` commit, `.env` nahi** | Secrets kabhi repo me nahi. Example file batati hai konse vars chahiye bina values leak kiye. | Koi nahi. |
@@ -295,6 +296,15 @@ A: Teen alag bottleneck hain. FastAPI layer stateless hai, horizontally scale ho
 **Q: Ise test kaise karoge?**
 A: Do levels. Unit — `should_retry` pure function hai, saare routing cases directly test ho jaate hain; `_extract_sql` ko fenced/unfenced/noisy inputs pe test karo. Integration — yahi eval harness hai: fixed question set, expected answers, aur `MAX_RETRIES=0` vs `3` chala ke accuracy delta measure karo. Wo delta hi is project ka asli metric hai.
 
+**Q: Agent galat step le le toh debug kaise karoge?** ← *ye production agentic AI ka sabse common sawaal hai*
+A: Do layers hain. `logs` array har node se append hota hai aur API response me jaata hai — wo user-facing explainability hai, aur usse dikh jaata hai ki kaunsa node chala aur kis order me. Lekin wo debugging ke liye kaafi nahi, kyunki usme raw prompt nahi hota. Uske liye LangSmith wired hai — `LANGCHAIN_TRACING_V2=true` plus ek key, aur bas: application me ek line tracing code nahi hai, LangChain ka callback system khud har LLM call instrument kar deta hai. Wahan poori retry chain ek nested trace hai — har `generate_sql` invocation, uska exact rendered prompt injected error ke saath, `_extract_sql` se pehle ka raw response, latency, aur per-attempt token cost.
+
+**Q: Wo tumhe practically kya batata hai?**
+A: Teen cheezein jo pehle guesswork thi. Ek — **retry actually kaam kar raha hai ya nahi**: trace me dikh jaata hai ki attempt 2 ne error ko incorporate kiya, ya wahi query dobara likh di. Ye is project ka core mechanism hai, toh usko verify kar paana zaroori hai. Do — **prompt regression**: schema description edit karne se generation kharab hui toh traced prompt me diff dikhta hai. Teen — **cost attribution**: ek retry token me kitna mehnga padta hai, aur slow request me kaunsa node bhaari hai. Ye teeno numbers eval harness ke saath milke retry budget ko reasoned choice se measured choice banayenge.
+
+**Q: Ye tracing sabke liye on hai?**
+A: Nahi, opt-in hai — `.env.example` aur `docker-compose.yml` dono me default `false`. Koi repo fork kare toh bina LangSmith account ke chal jaana chahiye, aur tracing off pe zero overhead hai kyunki koi code path uspe depend nahi karta. Aur ye deliberately server-side hai — raw prompts client tak nahi jaane chahiye, isliye wo `logs` array me kabhi nahi daale.
+
 **Q: Deploy kaise karoge?**
 A: Postgres Neon pe (serverless free tier), FastAPI Docker image Render pe, React Vercel pe, secrets env vars se inject. Render ka free tier cold-start karta hai toh demo se pehle URL warm kar lunga.
 
@@ -321,7 +331,14 @@ Teeno projects ko ek **pattern** ki tarah present karo, teen alag projects ki ta
 |---|---|---|---|
 | **Self-Healing SQL Agent** | SQL *execution errors* | **Cycle** — retry edge wapas generation pe | Database ka exception (deterministic, ground truth) |
 | **Adaptive CRAG** | Retrieval *relevance* | **Branch** — conditional fallback to web search | LLM grader ka judgement (probabilistic) |
-| **Code Guardian** | Code *defects* | **Fan-out/supervisor** — parallel specialist agents, phir merge | Specialist agents ke findings, synthesize hoke patch |
+| **Code Guardian** | Code *defects* | **Tool-calling supervisor** — LLM khud decide karta hai kaunse specialists chalane hain | Specialist agents ke findings, synthesize hoke patch |
+
+**Ek aur farak jo alag se bolna** — *kaun* control flow decide karta hai:
+
+- SQL Agent aur CRAG me **LangGraph ke edges** decide karte hain agla node kya hai (`should_retry`, grading branch). Ye deterministic aur auditable hai.
+- Code Guardian me **LLM khud** decide karta hai, `bind_tools` se — wo tool call emit karta hai aur graph usko execute karta hai.
+
+> "Dono patterns deliberately hain. SQL agent me control flow deterministic hona *chahiye* — retry ka decision database ke error se aata hai, model ke judgement se nahi, aur usme LLM ko ghusane ka matlab ek reliable signal ko probabilistic bana dena hoga. Code Guardian me model ka judgement hi routing signal hai — kaunsa audit chahiye ye code padh ke hi pata chalta hai. Asli skill ye jaanna hai ki kab kaunsa use karna hai."
 
 **Agar pucha jaye "kya ye overlap karte hain?":**
 > "Pattern share karte hain, implementation nahi. Teeno me graph topology alag hai — SQL agent me *cycle* hai, CRAG me *conditional branch*, Code Guardian me *fan-out supervisor*. Correction signal bhi alag hai: SQL agent ko database se deterministic ground truth milta hai, CRAG ko ek LLM grader ka probabilistic judgement — isliye CRAG ko guardrails ki zyada zaroorat hai, SQL agent ka feedback khud reliable hai. Milke ye teeno dikhate hain ki main agentic control flow ke teeno canonical shapes bana sakta hoon."
@@ -401,5 +418,6 @@ Interview me overclaim karna sabse bada risk hai. Agar interviewer code khol le 
 | "Accuracy X% hai" | "Abhi measure nahi kiya — eval harness bana raha hoon jo retry ke saath vs bina retry accuracy compare karega" |
 | "React UI hai" | "Backend complete hai, UI abhi banni hai — demo abhi Swagger se hota hai" |
 | "Production ready hai" | "Portfolio project hai; production ke liye read-only DB role, CORS tightening, aur eval chahiye" |
+| "LangSmith se traces analyze karta hoon" — **agar tumne ek baar bhi dashboard nahi khola** | Tracing wired hai, lekin **interview se pehle ek baar `LANGCHAIN_TRACING_V2=true` karke ek deliberately failing query chalao aur retry chain ko LangSmith pe khud dekho.** Screenshot le lo. Warna "kaisa dikhta hai?" pucha jaayega aur jawab nahi hoga — wiring claim karna aur trace padhna do alag cheezein hain |
 
 **Kyun ye important hai:** "maine ye nahi banaya, aur mujhe pata hai kyun zaroori hai" wala jawab, "maine sab bana liya" wale jhoothe jawab se *zyada* impressive hota hai. Interviewer gap dhundhte hain — unko khud batana control tumhare paas rakhta hai.

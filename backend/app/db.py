@@ -9,16 +9,32 @@ DATABASE_URL = os.environ.get(
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
 SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS departments (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    budget INTEGER NOT NULL CHECK (budget > 0),
+    location TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS employees (
     id SERIAL PRIMARY KEY,
     name TEXT NOT NULL,
-    department TEXT NOT NULL,
+    department_id INTEGER NOT NULL REFERENCES departments(id),
     salary INTEGER NOT NULL CHECK (salary > 0),
     role TEXT NOT NULL
 );
 """
 
-SEED_ROWS = [
+# (name, budget, location)
+DEPARTMENT_ROWS = [
+    ("Engineering", 2500000, "Bangalore"),
+    ("Marketing", 800000, "Mumbai"),
+    ("HR", 400000, "Delhi"),
+    ("Sales", 1200000, "Pune"),
+]
+
+# (name, department_name, salary, role)
+EMPLOYEE_ROWS = [
     ("Aarav Sharma", "Engineering", 95000, "Backend Engineer"),
     ("Priya Verma", "Engineering", 87000, "Frontend Engineer"),
     ("Rohan Gupta", "Engineering", 120000, "Engineering Manager"),
@@ -33,32 +49,89 @@ SEED_ROWS = [
 
 
 def get_schema_description() -> str:
-    """LLM ko prompt me bhejne ke liye plain-text schema description."""
+    """LLM ko prompt me bhejne ke liye plain-text schema description.
+
+    Isme deliberately do cheezein extra hain jo raw DDL me nahi hoti:
+    example values (taaki LLM ko pata ho department kaise dikhte hain) aur
+    join key ka explicit mention (taaki wo relationship guess na kare).
+    """
     return (
+        "Table: departments\n"
+        "Columns:\n"
+        "  id INTEGER PRIMARY KEY\n"
+        "  name TEXT UNIQUE (values e.g. 'Engineering', 'Marketing', 'HR', 'Sales')\n"
+        "  budget INTEGER (annual department budget)\n"
+        "  location TEXT (city, e.g. 'Bangalore', 'Mumbai', 'Delhi', 'Pune')\n"
+        "\n"
         "Table: employees\n"
         "Columns:\n"
         "  id INTEGER PRIMARY KEY\n"
         "  name TEXT\n"
-        "  department TEXT (values e.g. 'Engineering', 'Marketing', 'HR', 'Sales')\n"
-        "  salary INTEGER\n"
-        "  role TEXT\n"
+        "  department_id INTEGER REFERENCES departments(id)\n"
+        "  salary INTEGER (annual salary)\n"
+        "  role TEXT (job title, e.g. 'Backend Engineer', 'Sales Manager')\n"
+        "\n"
+        "Relationship: employees.department_id -> departments.id\n"
+        "The employees table has NO department name column — to filter or display a\n"
+        "department name you MUST join to the departments table.\n"
+    )
+
+
+def _needs_rebuild(conn) -> bool:
+    """Purana single-table schema detect karta hai.
+
+    Pehle `employees` me ek TEXT `department` column tha. Agar wo mila, toh
+    tables drop karke naye shape me rebuild karte hain. Ye demo-appropriate
+    hai (data sirf seed hai) — production me Alembic migration hoti.
+    """
+    return bool(
+        conn.execute(
+            text(
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_name = 'employees' AND column_name = 'department'"
+            )
+        ).scalar()
     )
 
 
 def init_db() -> None:
-    """Table banata hai (agar exist nahi karti) aur empty ho toh seed data daalta hai."""
+    """Tables banata hai (agar exist nahi karti) aur empty ho toh seed data daalta hai."""
     with engine.begin() as conn:
+        if _needs_rebuild(conn):
+            conn.execute(text("DROP TABLE IF EXISTS employees"))
+            conn.execute(text("DROP TABLE IF EXISTS departments"))
+
         conn.execute(text(SCHEMA_SQL))
-        count = conn.execute(text("SELECT COUNT(*) FROM employees")).scalar()
-        if count == 0:
+
+        if conn.execute(text("SELECT COUNT(*) FROM departments")).scalar() == 0:
             conn.execute(
                 text(
-                    "INSERT INTO employees (name, department, salary, role) "
-                    "VALUES (:name, :department, :salary, :role)"
+                    "INSERT INTO departments (name, budget, location) "
+                    "VALUES (:name, :budget, :location)"
                 ),
                 [
-                    {"name": n, "department": d, "salary": s, "role": r}
-                    for n, d, s, r in SEED_ROWS
+                    {"name": n, "budget": b, "location": loc}
+                    for n, b, loc in DEPARTMENT_ROWS
+                ],
+            )
+
+        if conn.execute(text("SELECT COUNT(*) FROM employees")).scalar() == 0:
+            dept_ids = dict(
+                conn.execute(text("SELECT name, id FROM departments")).fetchall()
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO employees (name, department_id, salary, role) "
+                    "VALUES (:name, :department_id, :salary, :role)"
+                ),
+                [
+                    {
+                        "name": n,
+                        "department_id": dept_ids[d],
+                        "salary": s,
+                        "role": r,
+                    }
+                    for n, d, s, r in EMPLOYEE_ROWS
                 ],
             )
 

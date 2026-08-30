@@ -57,6 +57,7 @@ def generate_sql(state: AgentState) -> AgentState:
             f"Schema:\n{schema}\n\n"
             f"Question: {state['question']}\n\n"
             "Write a single PostgreSQL SELECT query that answers this question. "
+            "Join across tables where the question needs data from more than one. "
             "Return ONLY the SQL query, no explanation."
         )
         logs.append("Generating initial SQL query.")

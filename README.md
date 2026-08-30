@@ -11,6 +11,7 @@ Most Text-to-SQL demos are a single LLM call: if the generated SQL is wrong, the
 | Agent Workflow | LangGraph (Python) — `StateGraph` with conditional edges |
 | LLM Inference | LangChain + Google Gemini 2.0 Flash (`temperature=0`) |
 | Output Safety | Prompt-level guardrails today; Guardrails AI planned (see Status) |
+| Observability | LangSmith tracing (opt-in via env vars, off by default) |
 | API Backend | FastAPI + Uvicorn |
 | Data Store | PostgreSQL 16 (SQLAlchemy Core + psycopg2) |
 | Frontend UI | React + Vite *(not built yet)* |
@@ -38,6 +39,7 @@ Honest snapshot — docs describe what exists, roadmap items are marked as such.
 - ✅ `backend/app/graph.py` — full LangGraph self-healing state machine
 - ✅ `backend/app/main.py` — `GET /health`, `POST /query`
 - ✅ Docker Compose (`db` + `backend` + `frontend`)
+- ✅ LangSmith tracing wired (opt-in; set `LANGCHAIN_TRACING_V2=true` + an API key)
 - ⬜ `departments` table + JOIN support (single flat table today)
 - ⬜ Evaluation harness (accuracy with retries vs without)
 - ⬜ Guardrails AI validator layer (currently prompt-level safety only)

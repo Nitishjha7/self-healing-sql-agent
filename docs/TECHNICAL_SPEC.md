@@ -146,6 +146,34 @@ The schema is handed to the LLM as a plain-text description from `get_schema_des
 
 ---
 
+## 6a. Observability — LangSmith Tracing **[Implemented]**
+
+The `logs` array gives the *user* a readable trace. It does not give the *developer* the raw prompts, token counts, or per-node latency needed to actually debug a bad run — so LangSmith is wired in alongside it.
+
+Enabled purely by environment variable; there is **no tracing code in the application**:
+
+```bash
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=<key from smith.langchain.com>
+LANGCHAIN_PROJECT=self-healing-sql-agent
+```
+
+LangChain's callback system picks these up at import time and instruments every `ChatGoogleGenerativeAI` call automatically. Unset or `false` (the default in `.env.example` and `docker-compose.yml`) means zero overhead and zero behaviour change — nothing in the graph depends on it.
+
+**What it buys on this particular project.** A self-healing run is inherently multi-step: up to four generation calls plus a synthesis call, with the prompt *changing between attempts*. When a run retries three times and still fails, the question a developer actually needs answered is "what exactly did the model see on attempt 2, and why didn't the error message fix it?" The `logs` array can't answer that — it records the SQL and the error, not the full prompt that produced them. LangSmith shows the retry chain as a nested trace: each `generate_sql` invocation, its exact rendered prompt including the injected error, the raw response before `_extract_sql` touched it, latency, and token cost per attempt.
+
+That makes three things debuggable that were previously guesswork:
+
+- **Prompt regressions** — if a schema-description edit quietly worsens generation, the diff is visible in the traced prompt.
+- **Retry effectiveness** — whether attempt N+1 actually incorporated the error, or just re-emitted the same query.
+- **Cost/latency attribution** — which node dominates a slow request, and what a retry genuinely costs in tokens.
+
+**Design note:** two observability layers is deliberate, not redundant. `logs` is a *product* feature — it ships in the API response and drives the UI's explainability story. LangSmith is a *developer* tool — it stays server-side, carries raw prompts that should never reach a client, and is opt-in so a fork of this repo runs without a LangSmith account.
+
+**[Planned]** Once the evaluation harness exists, its runs will be tagged into a LangSmith project so accuracy comparisons (`MAX_RETRIES=0` vs `3`) come with per-question traces instead of just an aggregate number.
+
+---
+
 ## 7. End-to-End Execution Flow
 
 1. **Ingestion** — the user submits a question (e.g. "Who earns more than 80000 in Engineering?").
