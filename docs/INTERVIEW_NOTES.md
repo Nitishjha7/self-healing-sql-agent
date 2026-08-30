@@ -125,6 +125,11 @@ Retry LangGraph ke `add_conditional_edges` se implement hua hai — `should_retr
 
 **Kyun matter karta hai:** ye ek `for` loop se architecturally alag hai — attempt history state object me rehta hai, har node ka execution alag se inspect ho sakta hai, aur aage HITL interrupt / checkpointer plug karna trivial hai (dono LangGraph ke graph-level features hain, jo raw loop me milte hi nahi).
 
+### 6.2a Measured, Not Assumed
+Eval harness (`eval/`) 20 questions pe execution accuracy nikalta hai, aur `MAX_RETRIES=0` vs `3` chala ke loop ka contribution isolate karta hai. **Production schema pe delta 0% nikla — kyunki loop ek baar bhi fire nahi hua (`avg retries = 0.00`).** Wo result chhupaya nahi hai, `eval/RESULTS.md` me poora likha hai.
+
+**Kyun matter karta hai:** yahi cheez tumhe 90% candidates se alag karti hai. Zyadatar log apna system measure hi nahi karte; jo karte hain, wo sirf accha number dikhate hain. "Maine measure kiya, delta 0 nikla, aur mujhe exactly pata hai kyun" — ye engineering judgement dikhata hai, marketing nahi.
+
 ### 6.3 Graceful Degradation
 Retries khatam hone pe user ko raw `psycopg2.errors.UndefinedColumn` traceback nahi milta — ek clean sorry message milta hai. Failure bhi ek designed path hai, crash nahi.
 
@@ -303,12 +308,32 @@ A: Nahi — **execution accuracy** use karta hoon, jo Text-to-SQL ka standard me
 **Q: Do metrics kyun report karte ho (accuracy aur strict)?**
 A: Kyunki questions projection specify hi nahi karte. "Who is the highest paid employee?" ka jawab `SELECT name` bhi sahi hai aur `SELECT name, salary, role` bhi. Doosre ko galat maanna SQL correctness nahi, prompt compliance measure karta hai. Toh headline metric relaxed hai — gold ka answer agent ke result me contain hona chahiye, same row count ke saath — aur strict exact-match alag column me report hota hai. Actually pehle maine sirf strict rakha tha, aur pehle hi smoke test me ek sahi answer FAIL ho gaya kyunki agent ne extra columns diye the. Tab metric badla.
 
-**Q: Tumhara eval dikhata hai retry se koi khaas farak nahi pada. Toh loop ka fayda kya?** ← *ye sabse tough sawaal hai, aur iska jawab hi tumhe alag karega*
-A: Sahi pakda, aur maine ye khud measure karke paya. Normal schema pe baseline hi 95% hai — kyunki meri `get_schema_description()` hand-tuned hai: usme example values hain, explicit relationship line hai, aur ek direct warning hai ki `employees` me department name column nahi hai toh join mandatory hai. Itni guidance ke saath model galat query likhta hi nahi, toh loop fire hi nahi hota. Us condition me eval **prompt** measure kar raha hai, **architecture** nahi.
+**Q: Tumhara eval dikhata hai retry se koi farak nahi pada. Toh loop ka fayda kya?** ← *ye sabse tough sawaal hai, aur iska jawab hi tumhe alag karega*
+
+**Asli numbers (production schema, `gemini-3.5-flash-lite`, 20 questions):**
+
+| MAX_RETRIES | Accuracy | Strict | Avg retries |
+|---|---|---|---|
+| 0 (loop off) | 19/20 (95%) | 16/20 (80%) | **0.00** |
+| 3 (real system) | 19/20 (95%) | 17/20 (85%) | **0.00** |
+
+**Delta: +0%.** Ye khud se bolna, chhupana nahi.
+
+A: Sahi pakda — aur maine ye khud measure karke paaya, isliye iska poora explanation mere paas hai. Dekho **`avg retries = 0.00`** — matlab **loop ek baar bhi fire hi nahi hua.** 20 me se ek bhi query aisi nahi thi jo Postgres reject karta. Toh ye run architecture measure hi nahi kar raha, wo **prompt** measure kar raha hai. Jis mechanism ko test karna hai wo activate hi na ho, toh us eval se us mechanism ke baare me kuch nahi kaha ja sakta.
+
+Wajah: baseline hi 95% hai — kyunki meri `get_schema_description()` hand-tuned hai: usme example values hain, explicit relationship line hai, aur ek direct warning hai ki `employees` me department name column nahi hai toh join mandatory hai. Itni guidance ke saath model galat query likhta hi nahi, toh loop fire hi nahi hota. Us condition me eval **prompt** measure kar raha hai, **architecture** nahi.
 
 Isliye maine ek second condition add ki — `--degrade-schema`. Wo schema description ko ek bare column listing se replace kar deta hai: koi relationship line nahi, koi example values nahi, koi join warning nahi. Yani jaisa schema description introspection se banta hai, jo real deployments me actually hota hai — kyunki koi 50-table schema ke liye hand-tuned hints nahi likhta. Us condition me model ko join khud infer karna padta hai, wo galtiyan karta hai, aur **tab** loop ke paas heal karne ko kuch hota hai.
 
 Do alag sawaal ka jawab milta hai: normal schema batata hai "acche prompt ke saath loop se kya milta hai", degraded schema batata hai "realistic prompt ke saath loop kitni accuracy recover karta hai". Doosra hi architecture ka imaandaar test hai — ek loop jo sirf us prompt pe madad kare jise tumne pehle hi tune kar rakha hai, wo zyada kaam nahi kar raha.
+
+**Q: Jo ek question fail hua, wo retry se kyun nahi bacha?** ← *ye jawab bahut strong hai, yaad rakho*
+A: Wo question tha "For each department, what percentage of its budget goes to salaries?" Agent ne ye likha:
+```sql
+SELECT d.name FROM departments d JOIN employees e ON d.id = e.department_id
+GROUP BY d.id, d.name ORDER BY SUM(e.salary) ASC LIMIT 1
+```
+Ye SQL **valid hai, cleanly execute hoti hai** — bas galat sawaal ka jawab deti hai (lowest-spending department, percentage nahi). Ye **semantic** failure hai, syntactic nahi. Aur mera loop structurally isko pakad hi nahi sakta, kyunki loop database exception se chalta hai — aur yahan koi exception hai hi nahi. Ye exactly wo failure class hai jo meri architecture address nahi karti, aur mujhe ye pata hai. Isko pakadne ke liye ek alag mechanism chahiye — result ko question ke against validate karne wala LLM critic, ya self-consistency (do queries generate karke results compare karna).
 
 **Q: Agar degraded schema pe bhi delta chhota nikla toh?**
 A: Toh main wahi bolunga jo data kehta hai — is schema ke size pe, is model ke saath, loop ka contribution X hai. Do tables aur 20 questions se universal claim banta hi nahi. Asli value tab dikhegi jab schema bada ho aur ambiguity zyada ho. Point ye hai ki maine **measure kiya** aur mujhe apne system ki limits pata hain — "maine bana diya, chalta hai" se ye kaafi alag position hai.
@@ -438,6 +463,7 @@ Interview me overclaim karna sabse bada risk hai. Agar interviewer code khol le 
 | "Accuracy X% hai" | "Abhi measure nahi kiya — eval harness bana raha hoon jo retry ke saath vs bina retry accuracy compare karega" |
 | "React UI hai" | "Backend complete hai, UI abhi banni hai — demo abhi Swagger se hota hai" |
 | "Production ready hai" | "Portfolio project hai; production ke liye read-only DB role, CORS tightening, aur eval chahiye" |
+| "Self-healing loop se accuracy X% badhi" | **Ye kabhi mat bolna jab tak degraded-schema run ka number na ho.** Production schema pe delta **0%** hai — loop fire hi nahi hua. Bolo: "maine measure kiya; ache prompt ke saath baseline itna high hai ki loop ko kaam hi nahi milta. Loop ki value schema ambiguity ke saath badhti hai, aur maine wo alag condition me measure kiya" |
 | "LangSmith se traces analyze karta hoon" — **agar tumne ek baar bhi dashboard nahi khola** | Tracing wired hai, lekin **interview se pehle ek baar `LANGCHAIN_TRACING_V2=true` karke ek deliberately failing query chalao aur retry chain ko LangSmith pe khud dekho.** Screenshot le lo. Warna "kaisa dikhta hai?" pucha jaayega aur jawab nahi hoga — wiring claim karna aur trace padhna do alag cheezein hain |
 
 **Kyun ye important hai:** "maine ye nahi banaya, aur mujhe pata hai kyun zaroori hai" wala jawab, "maine sab bana liya" wale jhoothe jawab se *zyada* impressive hota hai. Interviewer gap dhundhte hain — unko khud batana control tumhare paas rakhta hai.
