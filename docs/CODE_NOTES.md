@@ -13,7 +13,7 @@ Ye file har file/dependency ka **kaam aur reason** track karti hai, taaki baad m
 | `langgraph` | Graph-based agent orchestration library | Isi se `AgentState` state machine banayenge — nodes (`generate_sql`, `execute_sql`, `synthesize`) aur conditional edges (retry loop) define karne ke liye |
 | `langchain` | LLM ke saath interact karne ka framework (prompts, chains, message formatting) | LangGraph ke nodes ke andar LLM calls isi se karenge |
 | `langchain-google-genai` | LangChain ka Gemini-specific connector | Humne Gemini 2.0 Flash use karne ka decide kiya (free tier reliable hai) — isi package se Gemini ko LangChain me plug karte hain |
-| `guardrails-ai` | Output validation library | Final answer ko check karne ke liye — schema leakage, toxic content, hallucination na ho isliye. **⚠️ Abhi wired nahi hai** — dependency declare hai, lekin actual validation filhal sirf prompt-level hai (`synthesize_and_validate` ke system prompt me). Interview me ise "implemented" mat bolna |
+| ~~`guardrails-ai`~~ | Output validation library | **⚠️ Requirements se hata diya gaya hai.** Do wajah: (1) wo wire hi nahi hua tha — actual validation filhal sirf prompt-level hai (`synthesize_and_validate` ke system prompt me); (2) `0.5.10` `langchain-core<0.3` maangta hai jabki langgraph/langchain/langchain-google-genai teeno `>=0.3` maangte hain — **isse `pip install` fail hota tha aur Docker image build hi nahi hoti thi.** Jab validator node actually banega, tab `langchain-core>=0.3` compatible version pe wapas add hoga. Interview me ise "implemented" mat bolna |
 | `sqlalchemy` | Python se SQL database ke saath talk karne ka ORM/toolkit | PostgreSQL ke saath connection aur query execution ke liye — raw psycopg2 se zyada convenient hai |
 | `psycopg2-binary` | PostgreSQL driver (actual low-level connector) | SQLAlchemy ko PostgreSQL se baat karne ke liye ye driver chahiye hota hai (SQLAlchemy khud driver nahi hai, wrapper hai) |
 | `python-dotenv` | `.env` file se environment variables load karta hai | `DATABASE_URL`, `GOOGLE_API_KEY` jaise secrets ko code me hardcode karne ke bajaye `.env` se read karne ke liye |
@@ -27,8 +27,21 @@ Ye file har file/dependency ka **kaam aur reason** track karti hai, taaki baad m
 
 **Kya karta hai:**
 - SQLAlchemy `engine` banata hai jo `DATABASE_URL` env var se PostgreSQL se connect hota hai (default fallback localhost pe hai agar env var na mile).
-- `init_db()` — `employees` table create karta hai (agar already nahi hai), aur agar table khaali hai toh 10 sample employee rows seed kar deta hai. Ye function container start hone par ek baar call hoga.
-- `get_schema_description()` — schema ko plain text me return karta hai. Ye LLM ko prompt me dena hoga taaki wo columns/table naam sahi se jaan ke SQL banaye — LLM ko database ka "actual" access nahi hai, usse hum hi text me schema batate hain.
+- `init_db()` — `departments` aur `employees` dono tables create karta hai (agar already nahi hain), aur khaali hone pe 4 departments + 10 employees seed karta hai. Ye function container start hone par ek baar call hota hai.
+- `_needs_rebuild()` — purana single-table schema detect karta hai (`information_schema` se check karta hai ki `employees.department` TEXT column exist karta hai ya nahi). Mile toh dono tables drop karke naye shape me rebuild. **Kyun:** data sirf seed hai, toh drop safe hai — aur isse existing Docker volume pe bhi `docker compose up` bina kisi manual step ke chal jaata hai. Ye demo-appropriate hai, production migration strategy nahi (wahan Alembic hoti).
+- `get_schema_description()` — schema ko plain text me return karta hai. Ye LLM ko prompt me dena hota hai taaki wo columns/table naam sahi se jaan ke SQL banaye — LLM ko database ka "actual" access nahi hai, usse hum hi text me schema batate hain.
+
+**Two-table schema (kyun `department` TEXT ko FK banaya):**
+Pehle sirf ek flat `employees` table thi jisme `department` ek TEXT column tha. Problem ye thi ki har question ek single-table `WHERE` filter ban jaata tha — jo model lagbhag hamesha pehli baar me sahi kar leta hai. Matlab **self-healing loop ko heal karne ke liye kuch milta hi nahi tha**, aur project ka core USP demo me kabhi trigger hi nahi hota.
+
+Ab `departments` (id, name, budget, location) alag table hai aur `employees.department_id` uska foreign key hai. Isse model ko join **infer** karna padta hai: "Bangalore me kaun kaam karta hai" ke liye samajhna padega ki location `departments` pe hai, `employees` me department ka naam hai hi nahi, aur `department_id` hi bridge hai. Join galat karna real Text-to-SQL ka sabse common failure hai — aur wo exactly wahi precise Postgres error deta hai (`column e.department does not exist`) jo retry prompt consume karne ke liye bana hai.
+
+**Schema description me teen cheezein deliberately hain** jo raw DDL me nahi hoti:
+1. Example values (`'Engineering'`, `'Bangalore'`) — semantic hint
+2. Explicit relationship line: `employees.department_id -> departments.id`
+3. Ek direct warning: `employees` me department name column hai hi nahi, toh join **mandatory** hai
+
+Live introspection se sirf columns milte, ye guidance nahi — aur is tareeke se prompt token cost bhi fixed aur predictable rehta hai.
 - `run_sql(query)` — koi bhi SQL string execute karta hai aur result ko dict list me convert karke deta hai (taaki JSON me easily convert ho sake API response ke liye). Agar query galat hai (syntax/schema error), SQLAlchemy exception raise karega — yehi exception LangGraph node me catch hoga aur self-healing retry trigger karega.
 
 **Design choice:** Table/columns raw SQL se banaye (SQLAlchemy Core `text()`), ORM models (declarative classes) nahi banaye — kyunki agent khud dynamic SQL likhta hai, humein fixed ORM models ki zaroorat nahi, sirf raw execution chahiye.

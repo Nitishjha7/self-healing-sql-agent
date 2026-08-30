@@ -3,7 +3,11 @@ uvicorn[standard]==0.30.6
 langgraph==0.2.34
 langchain==0.3.3
 langchain-google-genai==2.0.1
-guardrails-ai==0.5.10
+# guardrails-ai: intentionally NOT pinned here yet.
+# 0.5.10 requires langchain-core<0.3, but langgraph/langchain/langchain-google-genai
+# above all need >=0.3 — pip cannot resolve that, so the image failed to build.
+# It was declared before the validator node was written. It gets added back at a
+# langchain-core>=0.3 compatible version when that node is actually built.
 sqlalchemy==2.0.35
 psycopg2-binary==2.9.9
 python-dotenv==1.0.1

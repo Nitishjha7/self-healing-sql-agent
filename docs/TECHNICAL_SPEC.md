@@ -119,19 +119,36 @@ Two layers today:
 
 ## 5. Database Schema & Sample Dataset **[Implemented]**
 
-PostgreSQL, representing an enterprise employee directory. Seeded with 10 rows across Engineering, Marketing, HR, and Sales.
+PostgreSQL, representing an enterprise employee directory. Two related tables, seeded with 4 departments and 10 employees.
+
+**`departments`**
+
+| Column | Data Type | Constraints | Description |
+|---|---|---|---|
+| `id` | SERIAL | PRIMARY KEY | Unique identifier |
+| `name` | TEXT | NOT NULL UNIQUE | Engineering, Marketing, HR, Sales |
+| `budget` | INTEGER | NOT NULL CHECK (budget > 0) | Annual department budget |
+| `location` | TEXT | NOT NULL | City — Bangalore, Mumbai, Delhi, Pune |
+
+**`employees`**
 
 | Column | Data Type | Constraints | Description |
 |---|---|---|---|
 | `id` | SERIAL | PRIMARY KEY | Unique identifier for the employee record |
 | `name` | TEXT | NOT NULL | Full name of the employee |
-| `department` | TEXT | NOT NULL | Assigned department (Engineering, Marketing, HR, Sales) |
-| `salary` | INTEGER | CHECK (salary > 0) | Annual base compensation |
+| `department_id` | INTEGER | NOT NULL REFERENCES `departments(id)` | Foreign key to the owning department |
+| `salary` | INTEGER | NOT NULL CHECK (salary > 0) | Annual base compensation |
 | `role` | TEXT | NOT NULL | Job title / functional role |
 
-The schema is handed to the LLM as a plain-text description from `get_schema_description()` rather than by introspecting the live database — deliberate, because the description also carries *semantic* hints (example department values) that raw DDL does not, and it keeps the prompt token cost fixed and predictable.
+### Why two tables
 
-**[Planned]** A `departments` table (`id`, `name`, `budget`, `location`) with `employees.department_id` as a foreign key, so the agent has to generate real JOINs.
+The single flat `employees` table this project started with could not exercise the hard part of Text-to-SQL. Every question reduced to a `WHERE` filter on one table, which a model gets right almost every time — so the self-healing loop had nothing realistic to heal. With a foreign key, the model must *infer the join* from the schema description: `"employees in Bangalore"` requires recognising that location lives on `departments`, that `employees` has no department name at all, and that `department_id` is the bridge. Getting a join wrong is the single most common real Text-to-SQL failure, and it produces exactly the kind of precise Postgres error (`column e.department does not exist`) that the retry prompt is built to consume.
+
+The schema is handed to the LLM as a plain-text description from `get_schema_description()` rather than by introspecting the live database. Deliberate: the description carries *semantic* hints that raw DDL does not — example values for `name` and `location`, an explicit `employees.department_id -> departments.id` relationship line, and a direct statement that `employees` has **no** department-name column so a join is mandatory. Introspection would give the model the columns but not that guidance, and prompt token cost stays fixed and predictable this way.
+
+### Schema migration
+
+`init_db()` detects the legacy single-table shape (an `employees.department` TEXT column, via `information_schema`) and rebuilds both tables when it finds it. Data here is seed data only, so a drop-and-rebuild is safe and keeps `docker compose up` working on an existing volume without a manual step. This is demo-appropriate, not a production migration strategy — production would use Alembic. Seeding is idempotent: both tables are only populated when their row count is zero.
 
 ---
 

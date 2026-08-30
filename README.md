@@ -40,7 +40,7 @@ Honest snapshot — docs describe what exists, roadmap items are marked as such.
 - ✅ `backend/app/main.py` — `GET /health`, `POST /query`
 - ✅ Docker Compose (`db` + `backend` + `frontend`)
 - ✅ LangSmith tracing wired (opt-in; set `LANGCHAIN_TRACING_V2=true` + an API key)
-- ⬜ `departments` table + JOIN support (single flat table today)
+- ✅ Two-table schema — `departments` + `employees` with a foreign key, so questions require real JOINs
 - ⬜ Evaluation harness (accuracy with retries vs without)
 - ⬜ Guardrails AI validator layer (currently prompt-level safety only)
 - ⬜ React chat UI (`frontend/` has only a Dockerfile)

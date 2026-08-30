@@ -13,7 +13,7 @@
 - ✅ Basic destructive-query guard (DROP/DELETE/UPDATE/INSERT block)
 - ✅ `docs/INTERVIEW_NOTES.md` — pitch, har design decision ka defence, anticipated Q&A, honesty checklist
 - ❌ Frontend UI abhi khaali hai (sirf `frontend/Dockerfile` hai)
-- ❌ Multi-table schema (abhi sirf ek table hai)
+- ✅ Multi-table schema — `departments` + `employees` FK ke saath, JOIN questions ab possible hain
 - ❌ Evaluation/accuracy measurement
 - ❌ Guardrails AI validator node (abhi safety sirf prompt-level hai)
 - ❌ Deployment
@@ -22,10 +22,23 @@
 
 ## Priority Order (interview-focused)
 
-### 1. Multi-table schema (JOIN complexity)
-Abhi sirf `employees` table hai — bahut flat/simple hai. Ek `departments` table add karenge (id, name, budget, location) aur `employees.department` ko foreign key bana denge.
+### 1. Multi-table schema (JOIN complexity) — ✅ DONE
+`departments` table (`id`, `name`, `budget`, `location`) add ho gaya, aur `employees.department` TEXT column ki jagah ab `department_id INTEGER REFERENCES departments(id)` hai.
 
-**Kyun zaroori hai:** Interview me sabse common sawaal hota hai "complex joins kaise handle kiye" — single table ke saath ye sawaal answer hi nahi ho sakta.
+**Kyun zaroori tha:** Interview me sabse common sawaal hota hai "complex joins kaise handle kiye" — single table ke saath ye sawaal answer hi nahi ho sakta tha. Aur technically bhi: flat table pe har question ek `WHERE` filter ban jaata tha, jo model lagbhag hamesha sahi kar leta hai — matlab **self-healing loop ko heal karne ke liye kuch milta hi nahi tha.** Ab model ko join *infer* karna padta hai, aur join galat karna hi real Text-to-SQL ka sabse common failure hai.
+
+**Kya kiya:**
+- `get_schema_description()` me dono tables, explicit `employees.department_id -> departments.id` relationship line, aur ek direct statement ki `employees` me department name column hai hi nahi (toh join mandatory hai)
+- `generate_sql` prompt me "join across tables where the question needs data from more than one"
+- `init_db()` me purane single-table schema ka detection (`information_schema` se) + rebuild — taaki existing Docker volume pe bhi `docker compose up` bina manual step ke chale
+- Seeding idempotent hai (dono tables sirf tab seed hote hain jab count 0 ho)
+
+**Verified:** FK constraint DB me present hai, JOIN + GROUP BY query chalti hai, purana schema mile toh rebuild hota hai, aur dobara `init_db()` chalane pe duplicate nahi aate.
+
+**Ab ye demo questions possible hain (pehle nahi the):**
+- "Which department has the highest average salary?" — JOIN + GROUP BY + ORDER BY
+- "Who works in Bangalore?" — location `departments` pe hai, employee `employees` pe
+- "Which department spends the most of its budget on salaries?" — JOIN + SUM + ratio
 
 ### 2. Evaluation script (sabse strong proof-of-work)
 Ek `eval/questions.json` file banayenge — 15-20 natural language questions with expected SQL/answer. Ek script (`eval/run_eval.py`) sabko agent ko bhejega aur measure karega:
