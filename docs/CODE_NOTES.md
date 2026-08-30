@@ -13,7 +13,7 @@ Ye file har file/dependency ka **kaam aur reason** track karti hai, taaki baad m
 | `langgraph` | Graph-based agent orchestration library | Isi se `AgentState` state machine banayenge — nodes (`generate_sql`, `execute_sql`, `synthesize`) aur conditional edges (retry loop) define karne ke liye |
 | `langchain` | LLM ke saath interact karne ka framework (prompts, chains, message formatting) | LangGraph ke nodes ke andar LLM calls isi se karenge |
 | `langchain-google-genai` | LangChain ka Gemini-specific connector | Humne Gemini 2.0 Flash use karne ka decide kiya (free tier reliable hai) — isi package se Gemini ko LangChain me plug karte hain |
-| `guardrails-ai` | Output validation library | Final answer ko check karne ke liye — schema leakage, toxic content, hallucination na ho isliye |
+| `guardrails-ai` | Output validation library | Final answer ko check karne ke liye — schema leakage, toxic content, hallucination na ho isliye. **⚠️ Abhi wired nahi hai** — dependency declare hai, lekin actual validation filhal sirf prompt-level hai (`synthesize_and_validate` ke system prompt me). Interview me ise "implemented" mat bolna |
 | `sqlalchemy` | Python se SQL database ke saath talk karne ka ORM/toolkit | PostgreSQL ke saath connection aur query execution ke liye — raw psycopg2 se zyada convenient hai |
 | `psycopg2-binary` | PostgreSQL driver (actual low-level connector) | SQLAlchemy ko PostgreSQL se baat karne ke liye ye driver chahiye hota hai (SQLAlchemy khud driver nahi hai, wrapper hai) |
 | `python-dotenv` | `.env` file se environment variables load karta hai | `DATABASE_URL`, `GOOGLE_API_KEY` jaise secrets ko code me hardcode karne ke bajaye `.env` se read karne ke liye |

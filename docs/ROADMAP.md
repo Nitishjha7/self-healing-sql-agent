@@ -11,9 +11,11 @@
 - ✅ `backend/app/main.py` — FastAPI (`/health`, `/query` endpoints)
 - ✅ `backend/Dockerfile`, `docker-compose.yml`, `.env.example`
 - ✅ Basic destructive-query guard (DROP/DELETE/UPDATE/INSERT block)
-- ❌ Frontend UI abhi khaali hai
+- ✅ `docs/INTERVIEW_NOTES.md` — pitch, har design decision ka defence, anticipated Q&A, honesty checklist
+- ❌ Frontend UI abhi khaali hai (sirf `frontend/Dockerfile` hai)
 - ❌ Multi-table schema (abhi sirf ek table hai)
 - ❌ Evaluation/accuracy measurement
+- ❌ Guardrails AI validator node (abhi safety sirf prompt-level hai)
 - ❌ Deployment
 
 ---
@@ -38,11 +40,10 @@ React + Vite se simple chat interface — question input, answer bubble, aur ek 
 
 **Kyun zaroori hai:** Interview me live demo dena easy ho jaata hai — Swagger UI professional nahi lagta demo ke liye.
 
-### 4. `docs/INTERVIEW_NOTES.md`
-Sab kuch consolidate karke ek cheat-sheet:
-- 30-second elevator pitch
-- Likely interview questions + tumhare answers ("kyun LangGraph", "retry limit 3 kyun", "Guardrails kya validate karta hai", "SQLite se Postgres kyun switch kiya")
-- Architecture diagram apne shabdon me explain
+### 4. `docs/INTERVIEW_NOTES.md` — ✅ ban chuka hai
+Cheat-sheet ready hai: 30-second pitch, har design decision ka defence (Section 7), limitations + mitigations, anticipated Q&A, demo scenarios, aur ek honesty checklist (kya claim nahi karna).
+
+**Jaise-jaise upar wale items build honge, ise update karna hai** — khaas kar Section 8 (Limitations) aur Section 15 (Honesty Checklist), taaki wo hamesha actual code se match karein.
 
 ---
 
@@ -86,4 +87,4 @@ Interview me "live URL hai" bolna bahut acha impression deta hai. Poora stack **
 2. Evaluation script
 3. Frontend chat UI
 4. Deployment (Neon + Render + Vercel)
-5. `docs/INTERVIEW_NOTES.md` (sabse last, jab sab kuch build ho chuka ho)
+5. Har step ke baad `docs/INTERVIEW_NOTES.md` ko refresh karna — Section 8 (Limitations) aur Section 15 (Honesty Checklist) hamesha actual code se match karein

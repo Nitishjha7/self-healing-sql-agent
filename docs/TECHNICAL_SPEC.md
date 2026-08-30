@@ -1,32 +1,50 @@
-# Self-Healing Data Query Agent: Technical Specification & Implementation Guide
+# Self-Healing Data Query Agent: Technical Specification
 
-This document provides a comprehensive technical specification, architecture design, and end-to-end implementation details for the Self-Healing Data Query Agent. Built using LangGraph, LangChain, Guardrails AI, FastAPI, PostgreSQL, and React, this system translates natural language questions into structured SQL queries, autonomously detects syntax/schema errors, executes self-healing reflection loops, and validates outputs against security and content policies.
+Comprehensive technical specification and architecture for the Self-Healing Data Query Agent. Built with LangGraph, LangChain, Google Gemini, FastAPI, PostgreSQL, and React, this system translates natural language questions into SQL, autonomously detects execution errors, runs a self-healing reflection loop, and validates its output before returning it.
+
+> **Reading this doc:** sections marked **[Implemented]** describe code that exists in `backend/app/`. Sections marked **[Planned]** are roadmap items and are not built yet. Nothing here is described as done unless it is done.
+
+---
 
 ## 1. Executive Summary & Core Objectives
 
-Traditional Text-to-SQL systems often fail when encountering complex schema joins, dialect differences, or ambiguous natural language queries. Without autonomous feedback, a single database syntax error results in a broken user experience. The Self-Healing Data Query Agent solves this by introducing cyclical graph-based execution:
+Traditional Text-to-SQL systems fail when they hit complex joins, dialect differences, or ambiguous phrasing. Without a feedback loop, one database error becomes a broken user experience — the classic single-shot pipeline has no way to learn from the failure it just caused.
 
-- **Cyclic State Graphs**: Utilizes LangGraph to implement stateful retry and self-healing loops upon SQL runtime failures.
-- **Safety & Policy Guardrails**: Integrates Guardrails AI to sanitize model responses, preventing schema leakage and offensive output generation.
-- **Full-Stack Decoupling**: Exposes the agentic state machine via a modular FastAPI REST interface paired with a reactive React frontend and Docker orchestration.
+The Self-Healing Data Query Agent solves this with cyclical graph-based execution:
+
+- **Cyclic state graph** — LangGraph conditional edges implement a stateful retry loop that re-enters the generation node carrying the failure context. **[Implemented]**
+- **Error-informed regeneration** — the retry prompt contains the previous SQL *and* the exact database exception, so the model corrects a specific fault rather than resampling blindly. **[Implemented]**
+- **Read-only enforcement** — destructive SQL is blocked before it reaches the database. **[Implemented]**
+- **Output safety** — synthesis runs under a system prompt that forbids schema leakage and bulk salary disclosure. A dedicated Guardrails AI validator node is **[Planned]**.
+- **Full-stack decoupling** — the state machine is exposed via a modular FastAPI REST interface, with a React frontend and Docker orchestration.
+
+---
 
 ## 2. System Architecture & Component Breakdown
 
-The system operates across three primary layers: UI Client, Orchestration/Backend Layer, and the Data Persistence Layer.
+Three layers: UI client, orchestration/backend, and data persistence.
 
-| Component | Technology | Primary Role |
-|---|---|---|
-| Agent Workflow | LangGraph (Python) | State machine management, node transitions, and conditional self-correction branching. |
-| LLM Inference | LangChain / Groq (Llama 3.3 70B) | SQL generation, error reflection, and natural language synthesis. |
-| Output Validation | Guardrails AI | Validates synthesized responses for toxic language, hallucination, and schema integrity. |
-| API Backend | FastAPI + Uvicorn | REST endpoints serving agent execution steps, trace logs, and responses. |
-| Data Store | SQLite3 | Target relational database for executing generated queries. |
-| Frontend UI | React + Vite | Chat interface providing real-time visibility into internal agent thought logs and SQL queries. |
-| Containerization | Docker & Docker Compose | Unified multi-container deployment with Nginx reverse proxy. |
+| Component | Technology | Primary Role | Status |
+|---|---|---|---|
+| Agent Workflow | LangGraph (Python) | State machine, node transitions, conditional self-correction branching | Implemented |
+| LLM Inference | LangChain + Google Gemini 2.0 Flash | SQL generation, error reflection, natural language synthesis | Implemented |
+| Data Store | PostgreSQL 16 (SQLAlchemy Core + psycopg2) | Target relational database for generated queries | Implemented |
+| API Backend | FastAPI + Uvicorn | REST endpoints serving agent execution, trace logs, responses | Implemented |
+| Output Validation | Guardrails AI | Dedicated validator node for toxicity / groundedness / schema integrity | Planned |
+| Frontend UI | React + Vite | Chat interface exposing agent trace logs and generated SQL | Planned |
+| Containerization | Docker & Docker Compose | Three-service stack with Nginx serving the frontend | Implemented |
 
-## 3. LangGraph State Machine & Self-Healing Logic
+### Why Gemini 2.0 Flash
 
-The agent utilizes a structured `AgentState` schema to carry context across nodes. When query execution fails, execution jumps back to the generation node with detailed database feedback.
+Chosen over Groq/Llama and GPT for three reasons: a genuinely usable free tier (this is a portfolio project, not a funded product), low latency on short structured outputs — which matters because a self-healing run can issue up to 4 generation calls plus a synthesis call — and strong instruction-following on "return only SQL, no prose", which keeps the `_extract_sql` parser simple. `temperature=0` throughout: SQL generation wants determinism, not creativity. The provider sits behind LangChain's chat interface, so swapping it is a one-line change in `_llm()`.
+
+### Why PostgreSQL, not SQLite
+
+An earlier draft of this project targeted SQLite. It was switched to Postgres because SQLite's permissive type affinity and forgiving parser mean many genuinely wrong queries still *succeed* — which starves the self-healing loop of the very errors it exists to fix. Postgres has strict typing, real constraint enforcement, and precise error messages (`column "salery" does not exist`), which is exactly the high-quality feedback signal the retry prompt depends on. It is also what the target production environment would actually be.
+
+---
+
+## 3. LangGraph State Machine & Self-Healing Logic **[Implemented]**
 
 ```
 +-------------------+
@@ -37,70 +55,128 @@ The agent utilizes a structured `AgentState` schema to carry context across node
 +-------------------+
 |   generate_sql    | <---------------------+
 +-------------------+                       |
-          |                                 | (If SQL error & retry < 3)
-          v                                 |
+          |                                 | "retry"
+          v                                 | (error AND retry_count < 3)
 +-------------------+                       |
 |    execute_sql    | -- [Conditional Edge] +
-+-------------------+
-          | (On Success)
-          v
-+------------------------+
-| synthesize_and_validate|
-+------------------------+
-          |
-          v
-+-------------------+
-|    Final Output   |
-+-------------------+
++-------------------+       should_retry
+          |    |
+          |    | "give_up" (error AND retries exhausted)
+          |    v
+          | +------------------------+
+          +>| synthesize_and_validate|
+ "success"  +------------------------+
+                       |
+                       v
+                     [END]
 ```
 
-### State Definition Specification
+`should_retry` is what makes this a **cyclic** graph rather than a linear chain — LangGraph decides the next node at runtime from the state, so `generate_sql` can be re-entered. That is the architectural difference between this and a `for` loop wrapped around a chain: the retry is a first-class edge in the graph, the full attempt history lives in the state object, and the trace is inspectable node by node.
+
+### Node contracts
+
+| Node | Reads from state | Writes to state | Notes |
+|---|---|---|---|
+| `generate_sql` | `question`, `error`, `sql_query`, `retry_count` | `sql_query`, `logs` | Branches internally: fresh prompt if `error` is empty, error-repair prompt otherwise |
+| `execute_sql` | `sql_query` | `query_result`, `error`, `retry_count`, `logs` | Destructive-keyword guard runs *before* the database call |
+| `synthesize_and_validate` | `question`, `query_result`, `error` | `final_answer`, `logs` | On `give_up`, returns a graceful message instead of a raw traceback |
+
+### The retry prompt (the actual USP)
+
+On failure the agent does **not** re-run the original prompt. It sends the schema, the question, the SQL that failed, and the verbatim database error, with the instruction to fix it. This is reflection, not resampling: the model is given a concrete, specific fault to correct.
+
+### Retry budget: why 3
+
+Empirically, genuine syntax/schema mistakes are corrected on the first or second retry once the model can see the error. Failures that survive three attempts are almost always *semantic* — an unanswerable question, or a column that does not exist in any form — and more retries just burn tokens and latency to arrive at the same failure. Three is a deliberate cost/latency ceiling, defined as `MAX_RETRIES` in one place so it is trivially tunable (and the planned eval harness sweeps it).
+
+### State Definition **[Implemented]**
 
 ```python
 class AgentState(TypedDict):
     question: str       # Original natural language question
-    sql_query: str      # Generated SQL statement
-    query_result: str   # Raw database output
-    error: str          # Exception message (if query execution failed)
-    retry_count: int    # Current retry iteration (Max limit: 3)
+    sql_query: str      # Most recently generated SQL statement
+    query_result: str   # Raw database output (stringified rows)
+    error: str          # Exception message; empty string means success
+    retry_count: int    # Current retry iteration (ceiling: MAX_RETRIES = 3)
     final_answer: str   # Validated natural language response
     logs: List[str]     # Step-by-step trace logs for UI visibility
 ```
 
-## 4. Database Schema & Sample Dataset
+`logs` is threaded through every node, so the API can return the complete decision trace — this is the explainability story, and the most demo-worthy part of the response payload.
 
-The agent connects to a local relational SQLite database representing an enterprise employee directory.
+---
 
-| Column Name | Data Type | Constraints | Description |
+## 4. Safety Model **[Implemented, with Planned extension]**
+
+Two layers today:
+
+1. **Pre-execution keyword guard** — `execute_sql` rejects any query containing `DROP`, `DELETE`, `UPDATE`, `INSERT`, `ALTER`, or `TRUNCATE` before it touches the database, and sets `retry_count` to the maximum so the graph exits rather than looping on an unfixable request.
+2. **Synthesis system prompt** — forbids revealing raw table/column names and bars listing multiple people's salaries unless an explicit comparison was requested.
+
+**Known limitation, stated honestly:** the keyword guard is substring matching, so it is conservative — a legitimate query containing the word "updated" in a string literal would be blocked. It is a demo-appropriate safety net, not a production authorization model. The correct production answer is a database-level read-only role, which costs nothing and cannot be prompt-injected around. **[Planned]** work is the Guardrails AI validator node and Phase 3 HITL approval, which replaces the hard block with an approval pause.
+
+---
+
+## 5. Database Schema & Sample Dataset **[Implemented]**
+
+PostgreSQL, representing an enterprise employee directory. Seeded with 10 rows across Engineering, Marketing, HR, and Sales.
+
+| Column | Data Type | Constraints | Description |
 |---|---|---|---|
-| id | INTEGER | PRIMARY KEY AUTOINCREMENT | Unique identifier for employee record. |
-| name | TEXT | NOT NULL | Full name of the employee. |
-| department | TEXT | NOT NULL | Assigned department (e.g., Engineering, Marketing, HR). |
-| salary | INTEGER | CHECK(salary > 0) | Annual base compensation. |
-| role | TEXT | NOT NULL | Job title / functional role. |
+| `id` | SERIAL | PRIMARY KEY | Unique identifier for the employee record |
+| `name` | TEXT | NOT NULL | Full name of the employee |
+| `department` | TEXT | NOT NULL | Assigned department (Engineering, Marketing, HR, Sales) |
+| `salary` | INTEGER | CHECK (salary > 0) | Annual base compensation |
+| `role` | TEXT | NOT NULL | Job title / functional role |
 
-## 5. End-to-End Execution Flow & Lifecycle
+The schema is handed to the LLM as a plain-text description from `get_schema_description()` rather than by introspecting the live database — deliberate, because the description also carries *semantic* hints (example department values) that raw DDL does not, and it keeps the prompt token cost fixed and predictable.
 
-1. **Query Ingestion**: The user enters a question in the React interface (e.g., "Who earns more than 80000 in Engineering?").
-2. **SQL Construction Node**: The LangGraph agent inspects the database schema and generates the initial SQL query.
-3. **Execution & Inspection**: The query is run against SQLite.
-   - If execution succeeds: Rows are passed forward to the synthesizer.
-   - If a syntax/schema error occurs: Error traceback is captured into the state, `retry_count` is incremented, and the agent re-enters the generation node with error context.
-4. **Guardrails Verification**: The final synthesized answer is parsed through Guardrails AI to verify safety and prevent sensitive data leakage.
-5. **Trace Delivery**: The API returns the answer along with step logs and the executed SQL query for client-side visualization.
+**[Planned]** A `departments` table (`id`, `name`, `budget`, `location`) with `employees.department_id` as a foreign key, so the agent has to generate real JOINs.
 
-## 6. Docker Containerization & Deployment Model
+---
 
-The application is fully containerized using a multi-service Docker Compose architecture:
+## 6. API Surface **[Implemented]**
 
-- **Backend Service**: Lightweight Python 3.11-slim container running FastAPI with persistent SQLite volume mounting.
-- **Frontend Service**: Multi-stage Node.js build served via high-performance Nginx with built-in `/api/` reverse proxy routing.
-- **Single-Command Orchestration**: Entire stack spins up via `docker compose up --build` with environment variable injection.
+| Endpoint | Method | Body | Response |
+|---|---|---|---|
+| `/health` | GET | — | `{"status": "ok"}` — Docker healthcheck |
+| `/query` | POST | `{"question": str}` | `{question, sql_query, final_answer, logs, retry_count}` |
 
-## 7. Future Extensions & Scaling Roadmap
+`init_db()` runs on FastAPI startup, so table creation and seeding need no manual step. CORS is currently `allow_origins=["*"]` for local development — a known item to tighten to the deployed frontend origin before deployment.
 
-| Phase | Enhancement Feature | Technical Impact |
+---
+
+## 7. End-to-End Execution Flow
+
+1. **Ingestion** — the user submits a question (e.g. "Who earns more than 80000 in Engineering?").
+2. **SQL construction** — `generate_sql` injects the schema description and question into a `temperature=0` Gemini call and extracts the SQL from the response, stripping any markdown fence.
+3. **Guard & execute** — the destructive-keyword check runs, then `run_sql` executes against Postgres.
+   - Success → rows are stringified into `query_result`, `error` is cleared.
+   - Failure → the exception message is captured into `error` and `retry_count` increments.
+4. **Conditional routing** — `should_retry` returns `retry`, `give_up`, or `success`.
+5. **Synthesis** — rows become a short natural-language answer under the safety system prompt, or a graceful failure message if the budget was exhausted.
+6. **Trace delivery** — the API returns the answer, the executed SQL, the retry count, and the full log array for client-side visualization.
+
+---
+
+## 8. Docker Containerization & Deployment Model **[Implemented]**
+
+Three-service Docker Compose stack:
+
+- **`db`** — `postgres:16` with a named `pgdata` volume and a `pg_isready` healthcheck; the backend waits on `service_healthy` so startup ordering is guaranteed rather than raced.
+- **`backend`** — `python:3.11-slim`, requirements installed before the app code is copied so Docker layer caching survives code edits, running Uvicorn on port 8000.
+- **`frontend`** — multi-stage Node build served by Nginx with `/api/` reverse-proxy routing. **[Planned — only a Dockerfile scaffold exists today.]**
+
+Single command: `docker compose up --build`, with secrets injected from `.env` (never committed; `.env.example` is the template).
+
+---
+
+## 9. Future Extensions & Scaling Roadmap
+
+Near-term, interview-focused priorities are in [ROADMAP.md](ROADMAP.md) — multi-table schema, evaluation harness, frontend, deployment. Beyond those:
+
+| Phase | Enhancement | Technical Impact |
 |---|---|---|
-| Phase 2 | Model Context Protocol (MCP) | Replace direct SQLite driver with standard SQLite MCP Server over stdio. |
-| Phase 3 | Human-in-the-Loop (HITL) | Introduce approval pauses before executing destructive queries (UPDATE/DELETE). |
-| Phase 4 | Postgres Checkpointer | Enable cross-session conversation memory and multi-tenant isolation. |
+| Phase 2 | Model Context Protocol (MCP) | Replace the direct SQLAlchemy driver with a standard Postgres MCP server over stdio, so the data access layer becomes a swappable tool rather than hard-wired code |
+| Phase 3 | Human-in-the-Loop (HITL) | LangGraph interrupt before executing destructive queries, replacing today's hard block with an approval pause |
+| Phase 4 | Postgres checkpointer | Cross-session conversation memory and multi-tenant isolation via LangGraph's persistence layer |
