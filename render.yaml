@@ -1,0 +1,33 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+#
+# Deploys the single-service image (FastAPI serving both the API and the built
+# React app) so the whole demo lives on one URL with no CORS to configure.
+#
+# The database is NOT defined here: Render's free Postgres expires after 30
+# days, which would silently kill the portfolio link. Use Neon's free tier
+# instead and paste its connection string into DATABASE_URL below.
+
+services:
+  - type: web
+    name: self-healing-sql-agent
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    region: singapore
+    healthCheckPath: /health
+    envVars:
+      # Set these in the Render dashboard — never commit real values.
+      - key: DATABASE_URL
+        sync: false          # Neon connection string, must end with ?sslmode=require
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.5-flash-lite
+      - key: RATE_LIMIT_REQUESTS
+        value: "5"
+      - key: RATE_LIMIT_WINDOW
+        value: "60"
+      # Single-service deploy is same-origin, so no cross-origin caller is
+      # expected. Left unset (defaults to "*") because CORS is not the control
+      # here — the rate limiter is.

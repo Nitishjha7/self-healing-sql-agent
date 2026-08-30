@@ -12,7 +12,7 @@ Ye file har file/dependency ka **kaam aur reason** track karti hai, taaki baad m
 | `uvicorn[standard]` | ASGI server jo FastAPI app ko actually run karta hai | FastAPI khud server nahi hai, use run karne ke liye ek server chahiye — Uvicorn sabse common choice hai |
 | `langgraph` | Graph-based agent orchestration library | Isi se `AgentState` state machine banayenge — nodes (`generate_sql`, `execute_sql`, `synthesize`) aur conditional edges (retry loop) define karne ke liye |
 | `langchain` | LLM ke saath interact karne ka framework (prompts, chains, message formatting) | LangGraph ke nodes ke andar LLM calls isi se karenge |
-| `langchain-google-genai` | LangChain ka Gemini-specific connector | Humne Gemini 2.0 Flash use karne ka decide kiya (free tier reliable hai) — isi package se Gemini ko LangChain me plug karte hain |
+| `langchain-google-genai` | LangChain ka Gemini-specific connector | Gemini use kar rahe hain (free tier). Model name env-configurable hai (`GEMINI_MODEL`) kyunki Google ke model names deprecate hote rehte hain — `gemini-2.0-flash` aur `gemini-2.5-flash` dono is project ke dauraan 404 dene lage — isi package se Gemini ko LangChain me plug karte hain |
 | ~~`guardrails-ai`~~ | Output validation library | **⚠️ Requirements se hata diya gaya hai.** Do wajah: (1) wo wire hi nahi hua tha — actual validation filhal sirf prompt-level hai (`synthesize_and_validate` ke system prompt me); (2) `0.5.10` `langchain-core<0.3` maangta hai jabki langgraph/langchain/langchain-google-genai teeno `>=0.3` maangte hain — **isse `pip install` fail hota tha aur Docker image build hi nahi hoti thi.** Jab validator node actually banega, tab `langchain-core>=0.3` compatible version pe wapas add hoga. Interview me ise "implemented" mat bolna |
 | `sqlalchemy` | Python se SQL database ke saath talk karne ka ORM/toolkit | PostgreSQL ke saath connection aur query execution ke liye — raw psycopg2 se zyada convenient hai |
 | `psycopg2-binary` | PostgreSQL driver (actual low-level connector) | SQLAlchemy ko PostgreSQL se baat karne ke liye ye driver chahiye hota hai (SQLAlchemy khud driver nahi hai, wrapper hai) |
@@ -46,7 +46,7 @@ Live introspection se sirf columns milte, ye guidance nahi — aur is tareeke se
 
 **Design choice:** Table/columns raw SQL se banaye (SQLAlchemy Core `text()`), ORM models (declarative classes) nahi banaye — kyunki agent khud dynamic SQL likhta hai, humein fixed ORM models ki zaroorat nahi, sirf raw execution chahiye.
 
-**Security note (abhi ke liye basic):** `run_sql` filhal kisi bhi SQL ko run kar sakta hai (SELECT ho ya DELETE/UPDATE). Agle step me isme ek guard lagayenge jo destructive queries (INSERT/UPDATE/DELETE/DROP) ko explicit permission ke bina block karega — ye Phase 3 (HITL) ka simplified version hoga.
+**Security note (abhi ke liye basic):** `run_sql` filhal kisi bhi SQL ko run kar sakta hai (SELECT ho ya DELETE/UPDATE). Guard `execute_sql` node me lag chuka hai (destructive keywords DB call se pehle block hote hain). **Sahi production answer phir bhi database-level read-only role hai** — wo prompt injection se bypass nahi ho sakta, jabki keyword matching kar sakti hai.
 
 ---
 
@@ -58,7 +58,7 @@ Ye file **project ka core hai** — poora self-healing LangGraph state machine y
 
 **`AgentState`** — TypedDict jo pura context carry karta hai node-to-node: question, current SQL, result, error, retry count, final answer, logs. Spec me diya gaya schema hi hai.
 
-**`_llm()`** — Gemini 2.0 Flash ko LangChain ke through initialize karta hai. `temperature=0` isliye rakha kyunki SQL generation me hume deterministic/precise output chahiye, creative nahi.
+**`_llm()`** — Gemini ko LangChain ke through initialize karta hai (model `GEMINI_MODEL` env var se, default `gemini-3.5-flash-lite`). `temperature=0` isliye rakha kyunki SQL generation me hume deterministic/precise output chahiye, creative nahi.
 
 **`_extract_sql()`** — LLM kabhi kabhi SQL ko ```sql ... ``` fenced block me ya extra explanation ke saath deta hai. Ye helper sirf clean SQL nikalta hai.
 
@@ -150,3 +150,82 @@ Pehle `GROQ_API_KEY` reh gaya tha jab hum Groq use karne wale the — Gemini pe 
 ---
 
 ## Aage jo bhi file banegi, uska explanation yahin niche add hoga.
+
+---
+
+## frontend/ — React + Vite chat UI
+
+**Kya hai:** Ek single-page chat interface jo `POST /api/query` call karta hai aur response ko readable bana ke dikhata hai.
+
+| File | Kaam |
+|---|---|
+| `src/App.jsx` | Poora UI — chat state, fetch call, turn rendering, retry badge, collapsible details |
+| `src/App.css` | Layout aur components ki styling |
+| `src/index.css` | CSS variables (light + dark), base typography |
+| `vite.config.js` | React plugin + dev-server proxy (`npm run dev` ke liye, container me nginx handle karta hai) |
+| `nginx.conf` | SPA fallback + `/api/` reverse proxy backend tak |
+| `Dockerfile` | Multi-stage — node build, phir nginx serve |
+
+**Design choices aur unke reason:**
+
+- **Koi UI library nahi (Tailwind/MUI nahi)** — UI itni chhoti hai ki plain CSS se kaam ho jaata hai. Ek dependency add karne ka matlab build complexity + bundle size, bina kisi fayde ke. Interview me ye defendable hai: "scope ke hisaab se choose kiya, habit se nahi."
+- **Retry badge (`First try` / `Self-healed after N retries`)** — ye UI ka sabse important element hai. `retry_count` hi wo ek number hai jo self-healing ko *prove* karta hai; usko badge banaya taaki demo me turant dikhe.
+- **Collapsible "Show SQL & steps"** — default me band, kyunki normal user ko answer chahiye. Khol ne pe executed SQL + poora `logs` array. Ye explainability wala hissa hai — black box nahi.
+- **Trace me colour coding** — `Execution failed` / `Blocked` red, `Retry N` amber, `Execution succeeded` green. Warna logs ek undifferentiated wall of text lagti hai aur self-healing ka moment usme kho jaata hai.
+- **Nginx proxy, direct backend call nahi** — frontend `/api/query` call karta hai apne hi origin pe, toh browser me CORS ka sawaal hi nahi aata aur backend ko public expose karne ki zaroorat nahi.
+- **`proxy_read_timeout 180s`** — nginx ka default 60s hai. Ek self-healing run 5 tak LLM calls kar sakta hai; default timeout usko beech retry me kaat deta, aur user ko 504 milta jabki agent theek kaam kar raha hota.
+- **Dockerfile me `package.json` pehle copy** — layer caching, wahi reason jo backend me hai.
+
+**Ports:** `docker-compose.yml` me dono ports override-able hain (`BACKEND_PORT`, `FRONTEND_PORT`) — kyunki 8000 aur 80 machine pe aksar dusre projects le lete hain.
+
+---
+
+## graph.py — read-only narration guard (baad me add hua)
+
+`synthesize_and_validate` ke system prompt me ye lines baad me add hui:
+
+> "This system is STRICTLY READ-ONLY... Never state or imply that data was added, changed, removed or otherwise modified."
+
+**Kyun:** UI testing me "Delete all employees from HR" poocha. Har data-touching layer sahi chala — system prompt ne generation ko SELECT tak rakha, keyword guard ko fire karne ki zaroorat hi nahi padi, database me kuch nahi badla. **Phir synthesizer ne jawab diya: "The employees Anjali Nair and Vikram Singh have been removed from the HR department."**
+
+Kuch remove nahi hua tha. Guard ne data bacha liya, par narration ne jhooth bol diya — aur jis user ko bataya jaye ki deletion ho gayi, uska nuksan waise hi hota hai. **False confirmation apne aap me ek alag harm class hai.**
+
+Ye ek achhi yaad dilane wali cheez hai: mera poora threat model "unauthorised write" pe focused tha, aur wo sab layers kaam kar rahi thi. Gap ye tha ki maine *action* guard kiya, uski *report* nahi.
+
+---
+
+## backend/app/ratelimit.py — per-IP rate limiting
+
+**Kya karta hai:** `/query` pe per-IP sliding window limit (default 5 questions / 60 seconds), env vars se configurable.
+
+**Kyun zaroori hai (ye polish nahi hai):** Public demo pe Gemini free tier **poore project** ke liye ~15 requests/minute deta hai — sab visitors me shared. Ek bot, ya ek curious recruiter jo 20 questions poochh de, quota khatam kar dega aur uske baad **har** visitor ko error milega. Bina rate limit ke demo khud ko tod deta hai.
+
+**Design choices:**
+- **In-memory dict of deques, koi Redis nahi** — single-container demo ke liye ye sahi trade-off hai. Multi-replica pe har process apna count rakhega, toh wahan shared store chahiye. **Ye limitation khud bolna interview me** — trade-off pata hona hi asli point hai.
+- **`/health` deliberately exempt** — UptimeRobot jaise pingers aur platform ke apne health checks kabhi throttle nahi hone chahiye. Agar `/health` bhi limited hota toh keep-alive ping hi service ko block kar deta.
+- **`X-Forwarded-For` ka pehla entry** — Cloud Run/Cloudflare/nginx sab connection khud terminate karte hain, toh `request.client.host` proxy ka IP hota hai. Header spoofable hai, par ye platforms use overwrite karte hain, aur galat hone ka nuksan sirf itna hai ki galat visitor throttle hoga — ye security boundary nahi hai.
+- **`MAX_TRACKED_IPS` ceiling** — bina iske dict har naye IP pe badhta rehta. User-controlled keys se bharne wali unbounded dict ek memory leak hi hai.
+
+**Verified:** 5 requests pass, 6th se 429 with `Retry-After`, aur `/health` bilkul throttle nahi hota.
+
+---
+
+## main.py — configurable CORS
+
+`ALLOWED_ORIGINS` env var (comma-separated), default `*`.
+
+**Kyun:** local me frontend nginx ke through same origin pe serve hota hai, toh CORS ki zaroorat hi nahi. Deploy pe frontend (Cloudflare Pages) aur backend (Cloud Run) alag origins pe hote hain — tab CORS chahiye, **par sirf apne frontend ke liye**. `*` chhod dena matlab koi bhi website tumhara backend call kar sakti hai aur tumhari LLM quota jala sakti hai.
+
+`allow_methods` bhi `["*"]` se `["GET", "POST"]` kar diya aur headers sirf `Content-Type` — API sirf yahi use karta hai, baaki khula rakhne ka koi reason nahi.
+
+---
+
+## frontend — VITE_API_BASE
+
+`App.jsx` me `const API_BASE = import.meta.env.VITE_API_BASE || ""`.
+
+Default khaali hai — Docker setup me nginx same origin pe `/api` proxy karta hai, toh relative URL hi chahiye. Split deployment me build ke time `VITE_API_BASE` set hota hai.
+
+**Dhyan rakhna:** ye **build-time** variable hai, runtime nahi — Vite ise bundle me bake kar deta hai. Cloudflare Pages pe value badalne ke baad **redeploy karna zaroori hai**, warna purani value chalti rahegi. Ye ek common gotcha hai.
+
+**429 handling:** frontend `res.status === 429` alag se pakadta hai aur backend ka `detail` message dikhata hai — kyunki throttle hona ek normal, samjhane wali state hai, generic error nahi.

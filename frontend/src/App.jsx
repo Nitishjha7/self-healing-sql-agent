@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import "./App.css";
 
+// Empty by default: the Docker/nginx setup proxies /api on the same origin.
+// A split deployment (frontend on Pages, backend on Cloud Run) sets
+// VITE_API_BASE to the backend's URL at build time.
+const API_BASE = import.meta.env.VITE_API_BASE || "";
+
 const EXAMPLES = [
   "Which department has the highest average salary?",
   "Who works in Bangalore?",
@@ -27,12 +32,20 @@ export default function App() {
     setTurns((prev) => [...prev, { question: trimmed }]);
 
     try {
-      const res = await fetch("/api/query", {
+      const res = await fetch(`${API_BASE}/api/query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: trimmed }),
       });
+
+      if (res.status === 429) {
+        // The demo shares one free LLM quota across all visitors, so being
+        // throttled is a normal state to explain, not an error to dump.
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail || "Too many questions — give it a minute.");
+      }
       if (!res.ok) throw new Error(`Backend returned ${res.status}`);
+
       const data = await res.json();
       setTurns((prev) => {
         const next = [...prev];

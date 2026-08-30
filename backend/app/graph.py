@@ -14,7 +14,7 @@ MAX_RETRIES = int(os.environ.get("MAX_RETRIES", "3"))
 
 # Env se override ho sakta hai — model versions deprecate hote rehte hain,
 # aur eval me alag models compare karne ke liye bhi kaam aata hai.
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.6-flash")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
 BLOCKED_KEYWORDS = ("DROP", "DELETE", "UPDATE", "INSERT", "ALTER", "TRUNCATE")
 
@@ -132,7 +132,18 @@ def synthesize_and_validate(state: AgentState) -> AgentState:
                 content=(
                     "You turn SQL query results into a short, natural-language answer. "
                     "Never reveal raw table/column names or internal schema details. "
-                    "Never include employee salary figures for more than one person unless explicitly asked to compare."
+                    "Never include employee salary figures for more than one person unless explicitly asked to compare. "
+                    # Without this the synthesizer reads a question like "delete all
+                    # employees from HR", sees rows come back from the SELECT that
+                    # actually ran, and reports the deletion as done. The data was
+                    # never touched, but the user is told it was — a false
+                    # confirmation is its own kind of harm, separate from the write
+                    # the guard already prevented.
+                    "This system is STRICTLY READ-ONLY: it only ever runs SELECT queries and "
+                    "never creates, updates or deletes anything. Never state or imply that data "
+                    "was added, changed, removed or otherwise modified. If the question asked for "
+                    "a modification, say plainly that you can only read data, then describe what "
+                    "the query returned."
                 )
             ),
             HumanMessage(

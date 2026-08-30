@@ -9,12 +9,12 @@ Most Text-to-SQL demos are a single LLM call: if the generated SQL is wrong, the
 | Layer | Technology |
 |---|---|
 | Agent Workflow | LangGraph (Python) — `StateGraph` with conditional edges |
-| LLM Inference | LangChain + Google Gemini 2.0 Flash (`temperature=0`) |
+| LLM Inference | LangChain + Google Gemini (`temperature=0`, model set via `GEMINI_MODEL`) |
 | Output Safety | Prompt-level guardrails today; Guardrails AI planned (see Status) |
 | Observability | LangSmith tracing (opt-in via env vars, off by default) |
 | API Backend | FastAPI + Uvicorn |
 | Data Store | PostgreSQL 16 (SQLAlchemy Core + psycopg2) |
-| Frontend UI | React + Vite *(not built yet)* |
+| Frontend UI | React 18 + Vite, served by Nginx (`/api/` reverse proxy) |
 | Containerization | Docker & Docker Compose |
 
 ## How it works
@@ -35,7 +35,7 @@ See [docs/TECHNICAL_SPEC.md](docs/TECHNICAL_SPEC.md) for the architecture and st
 
 Honest snapshot — docs describe what exists, roadmap items are marked as such.
 
-- ✅ `backend/app/db.py` — Postgres engine, `employees` table, seed data, `run_sql`
+- ✅ `backend/app/db.py` — Postgres engine, `departments` + `employees` tables (FK), seed data, `run_sql`
 - ✅ `backend/app/graph.py` — full LangGraph self-healing state machine
 - ✅ `backend/app/main.py` — `GET /health`, `POST /query`
 - ✅ Docker Compose (`db` + `backend` + `frontend`)
@@ -43,15 +43,17 @@ Honest snapshot — docs describe what exists, roadmap items are marked as such.
 - ✅ Two-table schema — `departments` + `employees` with a foreign key, so questions require real JOINs
 - ✅ Evaluation harness — 20 questions with gold SQL, execution-accuracy metric, retries-on vs retries-off comparison ([eval/](eval/))
 - ⬜ Guardrails AI validator layer (currently prompt-level safety only)
-- ⬜ React chat UI (`frontend/` has only a Dockerfile)
-- ⬜ Deployment (Neon + Render + Vercel)
+- ✅ React + Vite chat UI — answer bubbles, retry badge, collapsible SQL & execution trace, served by Nginx with an `/api/` proxy
+- ✅ Deployment prep — per-IP rate limiting, configurable CORS, build-time API URL, full guide in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
+- ⬜ Actually deployed (no live URL yet)
 
 ## Project Structure
 
 ```
 backend/    FastAPI app, LangGraph agent
-frontend/   React + Vite chat UI (scaffold only)
-docs/       Setup guide, technical spec, code notes, roadmap, interview notes
+frontend/   React + Vite chat UI, Nginx-served with an /api proxy
+eval/       Evaluation harness, gold questions, measured results
+docs/       Setup, technical spec, code notes, roadmap, interview notes, deployment
 ```
 
 ## Setup
@@ -61,9 +63,18 @@ cp .env.example .env   # fill in GOOGLE_API_KEY
 docker compose up --build
 ```
 
-This brings up three containers: `db` (PostgreSQL 16), `backend` (FastAPI + agent on :8000), and `frontend` (React via Nginx on :80). Swagger docs at `http://localhost:8000/docs`.
+This brings up three containers: `db` (PostgreSQL 16), `backend` (FastAPI + agent on :8000), and `frontend` (React via Nginx on :80). Open `http://localhost` for the chat UI; Swagger docs are at `http://localhost:8000/docs`.
 
-See [docs/SETUP.md](docs/SETUP.md) for the git/repo setup steps that were actually run.
+If those ports are taken, set `BACKEND_PORT` / `FRONTEND_PORT` in `.env` — the compose file reads both.
+
+### Measured results
+
+The self-healing loop doubles accuracy (15% → 30%) when the schema description is
+stale enough that queries actually fail, and contributes exactly nothing (95% →
+95%) when a well-tuned schema description means they never do. Full numbers,
+method, and the failure analysis are in [eval/RESULTS.md](eval/RESULTS.md).
+
+See [docs/SETUP.md](docs/SETUP.md) for the git/repo setup steps, and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) to put it online for free (Cloudflare Pages + Cloud Run + Neon).
 
 ## Roadmap
 

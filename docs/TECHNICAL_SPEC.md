@@ -111,7 +111,21 @@ class AgentState(TypedDict):
 Two layers today:
 
 1. **Pre-execution keyword guard** — `execute_sql` rejects any query containing `DROP`, `DELETE`, `UPDATE`, `INSERT`, `ALTER`, or `TRUNCATE` before it touches the database, and sets `retry_count` to the maximum so the graph exits rather than looping on an unfixable request.
-2. **Synthesis system prompt** — forbids revealing raw table/column names and bars listing multiple people's salaries unless an explicit comparison was requested.
+2. **Synthesis system prompt** — forbids revealing raw table/column names, bars listing multiple people's salaries unless an explicit comparison was requested, and states that the system is strictly read-only so the answer can never claim a write occurred.
+
+### The false-confirmation bug (found in manual testing, fixed)
+
+Asked *"Delete all employees from HR"*, the agent behaved correctly at every layer that touches data — the system prompt kept generation to `SELECT`, so the keyword guard never even had to fire, and nothing was written. Then the synthesizer read the question, saw two rows come back, and answered:
+
+> "The employees Anjali Nair and Vikram Singh have been removed from the HR department."
+
+Nothing had been removed. The guard held; the *narration* lied.
+
+This is worth stating precisely because it is a failure mode the obvious threat model misses. Every safety layer in the system was aimed at preventing an unauthorised write, and all of them worked. But a user who is told a deletion succeeded is harmed whether or not the deletion happened — they may stop looking for records that still exist, or report the change as done. **A false confirmation is its own class of harm, independent of the action it describes.**
+
+The fix is in the synthesis system prompt: the model is told the system is strictly read-only and must never state or imply that data was added, changed or removed; when a question asks for a modification it should say plainly that it can only read, then describe what the query returned. The agent now answers *"I can only read data and cannot perform deletions"* followed by the HR roster.
+
+The general lesson, and the reason this belongs in the spec rather than a commit message: guarding the *action* is not the same as guarding the *report of the action*, and only end-to-end testing through the real UI surfaced the gap.
 
 **Known limitation, stated honestly:** the keyword guard is substring matching, so it is conservative — a legitimate query containing the word "updated" in a string literal would be blocked. It is a demo-appropriate safety net, not a production authorization model. The correct production answer is a database-level read-only role, which costs nothing and cannot be prompt-injected around. **[Planned]** work is the Guardrails AI validator node and Phase 3 HITL approval, which replaces the hard block with an approval pause.
 

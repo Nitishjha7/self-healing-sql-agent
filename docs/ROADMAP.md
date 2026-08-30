@@ -6,17 +6,19 @@
 
 ## Current Status (jo ban chuka hai)
 
-- ✅ `backend/app/db.py` — PostgreSQL connection + `employees` table + seed data
-- ✅ `backend/app/graph.py` — LangGraph self-healing state machine (Gemini 2.0 Flash ke saath)
+- ✅ `backend/app/db.py` — PostgreSQL connection + `departments` & `employees` tables (FK) + seed data
+- ✅ `backend/app/graph.py` — LangGraph self-healing state machine (Gemini, model env-configurable)
 - ✅ `backend/app/main.py` — FastAPI (`/health`, `/query` endpoints)
 - ✅ `backend/Dockerfile`, `docker-compose.yml`, `.env.example`
 - ✅ Basic destructive-query guard (DROP/DELETE/UPDATE/INSERT block)
 - ✅ `docs/INTERVIEW_NOTES.md` — pitch, har design decision ka defence, anticipated Q&A, honesty checklist
-- ❌ Frontend UI abhi khaali hai (sirf `frontend/Dockerfile` hai)
+- ✅ Frontend chat UI — React + Vite, retry badge + collapsible SQL/trace, Nginx proxy ke saath
 - ✅ Multi-table schema — `departments` + `employees` FK ke saath, JOIN questions ab possible hain
-- ❌ Evaluation/accuracy measurement
+- ✅ Evaluation harness + measured results — 3 conditions, [eval/RESULTS.md](../eval/RESULTS.md)
+- ✅ LangSmith tracing wired (opt-in env vars)
 - ❌ Guardrails AI validator node (abhi safety sirf prompt-level hai)
-- ❌ Deployment
+- ✅ Deployment guide + rate limiting + configurable CORS — [docs/DEPLOYMENT.md](DEPLOYMENT.md)
+- ❌ Actually deployed (live URL abhi nahi hai)
 
 ---
 
@@ -53,12 +55,36 @@ Relaxed headline isliye kyunki questions projection specify hi nahi karte — "W
 
 **Kyun zaroori hai:** "Maine sirf bana ke chhod diya" vs "maine apna system measure kiya" — ye farak interviewer turant pakadta hai.
 
-**Rate limiting ek real problem nikli:** Gemini free tier kuch models pe sirf **20 requests/day** deta hai, aur ek self-healing run 5 tak LLM calls karta hai. Harness me exponential backoff + poora-question retry daalna pada. Quota per-model hoti hai, isliye eval `-lite` model pe chalta hai (`GEMINI_MODEL` env var), demo standard model pe.
+**Rate limiting ek real problem nikli:** Gemini free tier kuch models pe sirf **20 requests/day** deta hai, aur ek self-healing run 5 tak LLM calls karta hai. Harness me exponential backoff + poora-question retry daalna pada. Quota per-model hoti hai, isliye `GEMINI_MODEL` env var se model switch kar sakte hain.
 
-### 3. Frontend chat UI
-React + Vite se simple chat interface — question input, answer bubble, aur ek collapsible "Show SQL & steps" section jo `logs` array dikhaye (transparency/explainability dikhane ke liye).
+**Results — teen conditions chalayi, sirf schema description badla:**
+
+| Condition | Retries off | Retries on | Delta | Avg retries |
+|---|---|---|---|---|
+| Production schema (hand-tuned) | 95% | 95% | **+0pp** | 0.00 |
+| Degraded schema (bare column list) | 90% | 90% | **+0pp** | 0.00 |
+| **Stale schema (galat column names)** | **15%** | **30%** | **+15pp** | 2.25 |
+
+**Sabse important seekh:** pehli do conditions me loop ek baar bhi fire nahi hua (`avg retries = 0.00`) — achhe prompt ke saath model galat query likhta hi nahi. Toh wo runs **prompt** measure kar rahe the, **architecture** nahi.
+
+Isliye teesri condition banayi — schema description me aise column names jo exist hi nahi karte (schema drift, real deployments ka sabse common breakage). Wahan queries actually fail hoti hain, Postgres `HINT: Perhaps you meant to reference the column "employees.name"` deta hai, wo hint retry prompt me jaata hai, aur **accuracy double ho jaati hai.**
+
+Poora analysis + har failure ka breakdown [eval/RESULTS.md](../eval/RESULTS.md) me hai.
+
+⚠️ **Interview me number hamesha condition ke saath bolna** — bina context ke "accuracy double ho gayi" bolna cherry-picking hai.
+
+### 3. Frontend chat UI — ✅ DONE
+React 18 + Vite chat interface. Question input, answer bubbles, aur ek collapsible "Show SQL & steps" section jo executed SQL aur poora `logs` array dikhata hai — trace me failures red, retries amber, success green (transparency hi USP hai, toh wahi visually highlight kiya).
+
+Ek **retry badge** har answer pe: "First try" (green) ya "Self-healed after N retries" (amber). Yehi wo ek cheez hai jo demo me self-healing ko *dikhata* hai.
+
+Nginx multi-stage build se serve hota hai, `/api/` reverse proxy backend tak. Proxy timeout 180s rakha — default 60s ek self-healing run (5 tak LLM calls) ko beech me kaat deta hai.
 
 **Kyun zaroori hai:** Interview me live demo dena easy ho jaata hai — Swagger UI professional nahi lagta demo ke liye.
+
+**🐛 Ek serious bug isi UI testing me mila:** "Delete all employees from HR" poocha — guard ne sahi kaam kiya, SELECT hi chali, data safe raha. **Lekin synthesizer ne jawab diya "The employees Anjali Nair and Vikram Singh have been removed from the HR department."** Kuch remove nahi hua tha. Guard ne data bachaya, narration ne jhooth bola.
+
+Fix synthesis prompt me hai (system ab explicitly janta hai ki wo read-only hai aur kabhi modification claim nahi karega). **Lesson:** action ko guard karna aur us action ki *report* ko guard karna do alag cheezein hain — aur ye gap sirf end-to-end UI testing se mila, kyunki har component alag-alag sahi kaam kar raha tha.
 
 ### 4. `docs/INTERVIEW_NOTES.md` — ✅ ban chuka hai
 Cheat-sheet ready hai: 30-second pitch, har design decision ka defence (Section 7), limitations + mitigations, anticipated Q&A, demo scenarios, aur ek honesty checklist (kya claim nahi karna).
@@ -74,10 +100,17 @@ Interview me "live URL hai" bolna bahut acha impression deta hai. Poora stack **
 | Piece | Kahan deploy hoga | Kyun |
 |---|---|---|
 | PostgreSQL | [Neon](https://neon.tech) ya [Supabase](https://supabase.com) | Dono ka free tier hai, serverless Postgres, koi credit card nahi chahiye |
-| Backend (FastAPI) | [Render](https://render.com) free web service | Docker image se directly deploy ho jaata hai, free tier available |
-| Frontend (React) | [Vercel](https://vercel.com) ya [Netlify](https://netlify.com) | Free static hosting, GitHub se auto-deploy |
+| Backend (FastAPI) | **[Cloud Run](https://cloud.google.com/run)** (ya HF Spaces) | 1-2s cold start, 2M req/month free. ~~Render~~ 50+ sec cold start deta hai — portfolio ke liye deal-breaker |
+| Frontend (React) | **[Cloudflare Pages](https://pages.cloudflare.com)** | Free static hosting, always-on, unlimited bandwidth, GitHub auto-deploy |
 
-### Deployment steps (jab code ready ho jaye)
+### Deployment steps
+
+**Detailed guide ab [DEPLOYMENT.md](DEPLOYMENT.md) me hai** — ye section historical hai. Do cheezein badli:
+
+1. **Render chhod diya** — free tier 15 min me sota hai aur cold start 50+ sec leta hai, jo portfolio demo ke liye deal-breaker hai. **Cloud Run** (1-2s cold start) ya **HF Spaces + UptimeRobot** better hai.
+2. **Frontend Vercel ki jagah Cloudflare Pages** — dono free hain, Cloudflare pe unlimited bandwidth hai.
+
+Purane steps neeche reference ke liye:
 
 1. **Database (Neon)**
    - Neon pe free account banao, ek Postgres project create karo
@@ -106,5 +139,5 @@ Interview me "live URL hai" bolna bahut acha impression deta hai. Poora stack **
 1. Multi-table schema
 2. Evaluation script
 3. Frontend chat UI
-4. Deployment (Neon + Render + Vercel)
+4. Deployment (Neon + Cloud Run + Cloudflare Pages) — guide ready, [DEPLOYMENT.md](DEPLOYMENT.md)
 5. Har step ke baad `docs/INTERVIEW_NOTES.md` ko refresh karna — Section 8 (Limitations) aur Section 15 (Honesty Checklist) hamesha actual code se match karein

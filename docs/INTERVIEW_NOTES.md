@@ -287,6 +287,17 @@ A: `give_up` path synthesize node pe jaata hai jo ek clean apology deta hai — 
 **Q: LLM ko DROP TABLE likhne se kaise rokte ho?**
 A: Teen layers, aur main honest rahunga ki teeno abhi implemented nahi. Layer 1 — system prompt: "only ever write SELECT". Layer 2 — code guard: `execute_sql` database call se pehle destructive keywords reject karta hai. Layer 3, jo abhi nahi hai aur asli answer hai — database-level read-only role. Prompt bypass ho sakta hai, keyword match naive hai, lekin ek Postgres role jise `DELETE` grant hi nahi hai wo prompt injection se bypass nahi ho sakta.
 
+**Q: Koi bug mila jo testing me pakda?** ← *ye tumhara best story hai, iske liye taiyar raho*
+A: Haan, ek jo mujhe bahut kuch sikha gaya. Maine UI se poocha "Delete all employees from HR". Har data-touching layer sahi chala — system prompt ne generation ko SELECT tak rakha, toh keyword guard ko fire karne ki zaroorat hi nahi padi, aur database me kuch nahi badla. Phir synthesizer ne question padha, do rows aate dekhe, aur jawab diya: **"The employees Anjali Nair and Vikram Singh have been removed from the HR department."**
+
+Kuch remove nahi hua tha. **Guard ne data bacha liya, par narration ne jhooth bol diya.**
+
+Ye isliye important hai kyunki mera poora threat model galat jagah dekh raha tha — saari safety layers *unauthorised write* rokne ke liye thi, aur wo sab kaam kar gayi. Lekin jis user ko bataya jaye ki deletion ho gayi, uska nuksan waise hi hota hai chahe deletion hui ho ya nahi — wo un records ko dhundhna band kar dega jo abhi bhi exist karte hain, ya team ko bol dega ki kaam ho gaya. **False confirmation apne aap me ek alag harm class hai, us action se independent jise wo describe kar raha hai.**
+
+Fix synthesis prompt me hai: model ko batana ki system strictly read-only hai aur wo kabhi ye imply na kare ki data add/change/remove hua; modification wale question pe saaf bole ki wo sirf padh sakta hai, phir result describe kare. Ab jawab aata hai *"I can only read data and cannot perform deletions"* aur uske baad HR roster.
+
+**Lesson jo bolna hai:** *"action ko guard karna aur us action ki report ko guard karna do alag cheezein hain. Aur ye gap sirf end-to-end UI se test karne pe mila — unit test isko kabhi na pakadta, kyunki har component apna kaam sahi kar raha tha."*
+
 **Q: SQL injection ka risk?**
 A: Classic injection yahan alag shakal me hai — user input concatenate nahi ho raha, LLM poori query generate kar raha hai. Toh risk "malicious string escape kar gayi" nahi, "prompt ne model ko destructive query likhwa di" hai. Isliye defence prompt+keyword+DB-role layering hai, parameterization nahi — parameterize karne ko yahan kuch hai hi nahi, query khud hi generated artifact hai.
 
@@ -310,18 +321,25 @@ A: Kyunki questions projection specify hi nahi karte. "Who is the highest paid e
 
 **Q: Tumhara eval dikhata hai retry se koi farak nahi pada. Toh loop ka fayda kya?** ← *ye sabse tough sawaal hai, aur iska jawab hi tumhe alag karega*
 
-**Asli numbers (production schema, `gemini-3.5-flash-lite`, 20 questions):**
+**Asli numbers — teen conditions, `gemini-3.5-flash-lite`, 20 questions. Sirf schema description badla, questions/DB/code same:**
 
-| MAX_RETRIES | Accuracy | Strict | Avg retries |
-|---|---|---|---|
-| 0 (loop off) | 19/20 (95%) | 16/20 (80%) | **0.00** |
-| 3 (real system) | 19/20 (95%) | 17/20 (85%) | **0.00** |
+| Condition | Retries off | Retries on | Delta | Avg retries |
+|---|---|---|---|---|
+| Production schema (hand-tuned) | 95% | 95% | **+0pp** | 0.00 |
+| Degraded schema (bare column list) | 90% | 90% | **+0pp** | 0.00 |
+| **Stale schema (galat column names)** | **15%** | **30%** | **+15pp** | 2.25 |
 
-**Delta: +0%.** Ye khud se bolna, chhupana nahi.
+**Headline jo bolna hai:** *"Self-healing loop accuracy double kar deta hai — lekin sirf tab jab queries actually fail hoti hain."*
 
-A: Sahi pakda — aur maine ye khud measure karke paaya, isliye iska poora explanation mere paas hai. Dekho **`avg retries = 0.00`** — matlab **loop ek baar bhi fire hi nahi hua.** 20 me se ek bhi query aisi nahi thi jo Postgres reject karta. Toh ye run architecture measure hi nahi kar raha, wo **prompt** measure kar raha hai. Jis mechanism ko test karna hai wo activate hi na ho, toh us eval se us mechanism ke baare me kuch nahi kaha ja sakta.
+A: Sahi pakda, aur maine ye khud measure karke paaya — isliye poora explanation mere paas hai. Pehli do conditions me **`avg retries = 0.00`** hai, matlab **loop ek baar bhi fire hi nahi hua.** Ek bhi query aisi nahi thi jise Postgres reject karta. Toh wo runs architecture measure hi nahi kar rahe, wo **prompt** measure kar rahe hain — jis mechanism ko test karna hai wo activate hi na ho toh us eval se uske baare me kuch nahi kaha ja sakta.
 
-Wajah: baseline hi 95% hai — kyunki meri `get_schema_description()` hand-tuned hai: usme example values hain, explicit relationship line hai, aur ek direct warning hai ki `employees` me department name column nahi hai toh join mandatory hai. Itni guidance ke saath model galat query likhta hi nahi, toh loop fire hi nahi hota. Us condition me eval **prompt** measure kar raha hai, **architecture** nahi.
+Isliye maine teesri condition banayi — **stale schema**: description me aise column names jo ab exist nahi karte (`emp_name` jabki actual `name` hai). Ye **schema drift** hai, real Text-to-SQL deployments ka sabse common breakage. Wahan queries actually fail hoti hain, loop fire hota hai, aur **accuracy 15% se 30% ho jaati hai.**
+
+Aur wo kaam kaise karta hai ye bhi specific hai — Postgres ka error khali "column nahi hai" nahi bolta, wo `HINT: Perhaps you meant to reference the column "employees.name"` deta hai. Wahi hint retry prompt me jaata hai. Isiliye error-informed regeneration blind resampling se behtar hai: model ko dobara guess nahi karna, usko correction hath me mil jaata hai.
+
+**Imaandaari se 30% hi kyun:** stale condition me *saare* column names galat hain, aur Postgres ek baar me ek column hint karta hai — teen retries kaafi nahi padte (`avg retries 2.25`, ceiling 3 ke bahut paas). Real drift me ek-do column badalte hain, wahan loop zyada recover karega.
+
+Wajah pehli condition me baseline hi 95% hai — kyunki meri `get_schema_description()` hand-tuned hai: usme example values hain, explicit relationship line hai, aur ek direct warning hai ki `employees` me department name column nahi hai toh join mandatory hai. Itni guidance ke saath model galat query likhta hi nahi, toh loop fire hi nahi hota. Us condition me eval **prompt** measure kar raha hai, **architecture** nahi.
 
 Isliye maine ek second condition add ki — `--degrade-schema`. Wo schema description ko ek bare column listing se replace kar deta hai: koi relationship line nahi, koi example values nahi, koi join warning nahi. Yani jaisa schema description introspection se banta hai, jo real deployments me actually hota hai — kyunki koi 50-table schema ke liye hand-tuned hints nahi likhta. Us condition me model ko join khud infer karna padta hai, wo galtiyan karta hai, aur **tab** loop ke paas heal karne ko kuch hota hai.
 
@@ -463,7 +481,7 @@ Interview me overclaim karna sabse bada risk hai. Agar interviewer code khol le 
 | "Accuracy X% hai" | "Abhi measure nahi kiya — eval harness bana raha hoon jo retry ke saath vs bina retry accuracy compare karega" |
 | "React UI hai" | "Backend complete hai, UI abhi banni hai — demo abhi Swagger se hota hai" |
 | "Production ready hai" | "Portfolio project hai; production ke liye read-only DB role, CORS tightening, aur eval chahiye" |
-| "Self-healing loop se accuracy X% badhi" | **Ye kabhi mat bolna jab tak degraded-schema run ka number na ho.** Production schema pe delta **0%** hai — loop fire hi nahi hua. Bolo: "maine measure kiya; ache prompt ke saath baseline itna high hai ki loop ko kaam hi nahi milta. Loop ki value schema ambiguity ke saath badhti hai, aur maine wo alag condition me measure kiya" |
+| "Self-healing loop se accuracy double ho gayi" — **bina condition bataye** | Number sach hai (15% → 30%) lekin wo **stale-schema** condition ka hai. Production schema pe delta **0%** hai. Hamesha condition ke saath bolo: *"jahan queries actually fail hoti hain wahan loop accuracy double karta hai; jahan prompt achha hai wahan loop fire hi nahi hota aur contribution zero hai. Maine dono measure kiye."* Bina context ke number bolna cherry-picking hai, aur interviewer results.json khol sakta hai |
 | "LangSmith se traces analyze karta hoon" — **agar tumne ek baar bhi dashboard nahi khola** | Tracing wired hai, lekin **interview se pehle ek baar `LANGCHAIN_TRACING_V2=true` karke ek deliberately failing query chalao aur retry chain ko LangSmith pe khud dekho.** Screenshot le lo. Warna "kaisa dikhta hai?" pucha jaayega aur jawab nahi hoga — wiring claim karna aur trace padhna do alag cheezein hain |
 
 **Kyun ye important hai:** "maine ye nahi banaya, aur mujhe pata hai kyun zaroori hai" wala jawab, "maine sab bana liya" wale jhoothe jawab se *zyada* impressive hota hai. Interviewer gap dhundhte hain — unko khud batana control tumhare paas rakhta hai.
