@@ -210,9 +210,8 @@ Ye section hi is doc ka core hai. Har row: kya kiya, kyun kiya, kya cost hai.
 ### ~~Limitation 1 — Single flat table~~ ✅ FIXED
 Ab `departments` + `employees` FK ke saath hai, toh model ko join infer karna padta hai. **Lekin honest scope bata dena:** do tables hain, twenty nahi. Real enterprise schema me 50+ tables hote hain jahan sirf schema description prompt me fit hi nahi hoti — wahan schema retrieval (sirf relevant tables select karna) chahiye. Do tables join reasoning prove karte hain, schema *scale* nahi.
 
-### Limitation 2 — Koi measured accuracy nahi
-Abhi tak "kitne % questions sahi answer hue" ka koi number nahi hai.
-**Mitigation:** roadmap ka #2 item — 15-20 question ka eval set, aur `MAX_RETRIES=0` vs `MAX_RETRIES=3` compare karke exact accuracy delta nikalna. **Yahi wo number hai jo self-healing loop ka value prove karega** — usse pehle wo ek claim hai, evidence nahi.
+### ~~Limitation 2 — Koi measured accuracy nahi~~ ✅ FIXED
+Eval harness ban gaya — 20 questions gold SQL ke saath, execution accuracy metric, aur `MAX_RETRIES=0` vs `3` ka comparison. **Honest scope:** 20 questions ek chhota set hai, aur ek hi schema pe hai — ye statistical significance nahi deta, direction deta hai. Bade claim ke liye zyada questions aur multiple schemas chahiye. Ye bhi bolna: numbers ek hi model pe hain, toh wo *is* model ke saath *is* architecture ka delta hai — universal claim nahi.
 
 ### Limitation 3 — Guardrails AI abhi wired nahi hai
 `guardrails-ai` requirements me hai, lekin abhi safety sirf prompt-level hai.
@@ -296,7 +295,26 @@ A: Abhi plain-text description hard-coded hai. Deliberate — usme main semantic
 A: Teen alag bottleneck hain. FastAPI layer stateless hai, horizontally scale ho jaayega. Database pe connection pooling already hai (`pool_pre_ping`), aage PgBouncer. Asli bottleneck LLM latency hai — ek self-healing run me 4 tak generation calls plus synthesis ho sakti hai, toh main successful question→SQL pairs ko cache karunga taaki repeated questions LLM ko hit hi na karein.
 
 **Q: Ise test kaise karoge?**
-A: Do levels. Unit — `should_retry` pure function hai, saare routing cases directly test ho jaate hain; `_extract_sql` ko fenced/unfenced/noisy inputs pe test karo. Integration — yahi eval harness hai: fixed question set, expected answers, aur `MAX_RETRIES=0` vs `3` chala ke accuracy delta measure karo. Wo delta hi is project ka asli metric hai.
+A: Do levels. Unit — `should_retry` pure function hai, saare routing cases directly test ho jaate hain; `_extract_sql` ko fenced/unfenced/noisy inputs pe test karo. Integration — eval harness bana hua hai: 20 questions gold SQL ke saath, aur `MAX_RETRIES=0` vs `3` chala ke accuracy delta measure hota hai. Wo delta hi is project ka asli metric hai.
+
+**Q: Accuracy measure kaise karte ho? SQL match karte ho?** ← *ye achha sawaal hai, iska jawab ratt lo*
+A: Nahi — **execution accuracy** use karta hoon, jo Text-to-SQL ka standard metric hai. Gold SQL aur agent ka SQL dono chalata hoon aur **result sets** compare karta hoon. String match isliye nahi kyunki ek hi question ke bahut saare equally-correct SQL ho sakte hain — wo correctness nahi, stylistic agreement measure karta. Aur LLM-as-judge isliye nahi kyunki wo reliability problem ko ek aise component me daal deta hai jo khud unmeasured hai — poora point hi measurement tha.
+
+**Q: Do metrics kyun report karte ho (accuracy aur strict)?**
+A: Kyunki questions projection specify hi nahi karte. "Who is the highest paid employee?" ka jawab `SELECT name` bhi sahi hai aur `SELECT name, salary, role` bhi. Doosre ko galat maanna SQL correctness nahi, prompt compliance measure karta hai. Toh headline metric relaxed hai — gold ka answer agent ke result me contain hona chahiye, same row count ke saath — aur strict exact-match alag column me report hota hai. Actually pehle maine sirf strict rakha tha, aur pehle hi smoke test me ek sahi answer FAIL ho gaya kyunki agent ne extra columns diye the. Tab metric badla.
+
+**Q: Tumhara eval dikhata hai retry se koi khaas farak nahi pada. Toh loop ka fayda kya?** ← *ye sabse tough sawaal hai, aur iska jawab hi tumhe alag karega*
+A: Sahi pakda, aur maine ye khud measure karke paya. Normal schema pe baseline hi 95% hai — kyunki meri `get_schema_description()` hand-tuned hai: usme example values hain, explicit relationship line hai, aur ek direct warning hai ki `employees` me department name column nahi hai toh join mandatory hai. Itni guidance ke saath model galat query likhta hi nahi, toh loop fire hi nahi hota. Us condition me eval **prompt** measure kar raha hai, **architecture** nahi.
+
+Isliye maine ek second condition add ki — `--degrade-schema`. Wo schema description ko ek bare column listing se replace kar deta hai: koi relationship line nahi, koi example values nahi, koi join warning nahi. Yani jaisa schema description introspection se banta hai, jo real deployments me actually hota hai — kyunki koi 50-table schema ke liye hand-tuned hints nahi likhta. Us condition me model ko join khud infer karna padta hai, wo galtiyan karta hai, aur **tab** loop ke paas heal karne ko kuch hota hai.
+
+Do alag sawaal ka jawab milta hai: normal schema batata hai "acche prompt ke saath loop se kya milta hai", degraded schema batata hai "realistic prompt ke saath loop kitni accuracy recover karta hai". Doosra hi architecture ka imaandaar test hai — ek loop jo sirf us prompt pe madad kare jise tumne pehle hi tune kar rakha hai, wo zyada kaam nahi kar raha.
+
+**Q: Agar degraded schema pe bhi delta chhota nikla toh?**
+A: Toh main wahi bolunga jo data kehta hai — is schema ke size pe, is model ke saath, loop ka contribution X hai. Do tables aur 20 questions se universal claim banta hi nahi. Asli value tab dikhegi jab schema bada ho aur ambiguity zyada ho. Point ye hai ki maine **measure kiya** aur mujhe apne system ki limits pata hain — "maine bana diya, chalta hai" se ye kaafi alag position hai.
+
+**Q: Rate limits kaise handle kiye?**
+A: Free tier kuch models pe sirf **20 requests per day** deta hai, aur ek self-healing run 5 tak LLM calls kar sakta hai — toh 429 exceptional nahi, expected hai. Harness exponential backoff karta hai aur poora question retry karta hai; 5 attempts ke baad bhi fail ho toh error record hota hai, silently drop nahi hota. Aur quota per-model hoti hai, toh eval `-lite` model pe chalta hai `GEMINI_MODEL` env var se, jabki demo standard model pe.
 
 **Q: Agent galat step le le toh debug kaise karoge?** ← *ye production agentic AI ka sabse common sawaal hai*
 A: Do layers hain. `logs` array har node se append hota hai aur API response me jaata hai — wo user-facing explainability hai, aur usse dikh jaata hai ki kaunsa node chala aur kis order me. Lekin wo debugging ke liye kaafi nahi, kyunki usme raw prompt nahi hota. Uske liye LangSmith wired hai — `LANGCHAIN_TRACING_V2=true` plus ek key, aur bas: application me ek line tracing code nahi hai, LangChain ka callback system khud har LLM call instrument kar deta hai. Wahan poori retry chain ek nested trace hai — har `generate_sql` invocation, uska exact rendered prompt injected error ke saath, `_extract_sql` se pehle ka raw response, latency, aur per-attempt token cost.

@@ -191,6 +191,31 @@ That makes three things debuggable that were previously guesswork:
 
 ---
 
+## 6b. Evaluation Harness **[Implemented]**
+
+`eval/` holds 20 natural-language questions with gold SQL, and a harness that measures whether the self-healing loop earns its complexity.
+
+**Metric — execution accuracy.** The harness executes both the gold query and the agent's query and compares result sets. It deliberately avoids the two easier options: comparing SQL strings (many different queries are equally correct, so that measures stylistic agreement) and LLM-as-judge (that moves the reliability problem into a component nobody is measuring).
+
+Two numbers are reported:
+
+| Metric | Rule | Measures |
+|---|---|---|
+| **Accuracy** (headline) | Same row count; every gold row's values appear as a subset of a distinct agent row | Did it find the right answer? |
+| **Strict** | Exact set-of-rows equality | Did it also project exactly the expected columns? |
+
+The relaxed headline exists because the questions do not specify a projection. *"Who is the highest paid employee?"* is answered correctly by `SELECT name` and equally correctly by `SELECT name, salary, role` — scoring the latter wrong measures prompt compliance, not SQL correctness. Column names are ignored in both (aliasing is not an error), and numbers compare at 2dp so a `Decimal` average matches a rounded float.
+
+**The experiment.** The same 20 questions run at `MAX_RETRIES=0` (loop disabled — one shot, a failure stays a failure) and `MAX_RETRIES=3` (the real system). That isolates the contribution of the *architecture* from the contribution of the *model*, which a single accuracy number cannot do. `graph.py` reads `MAX_RETRIES` as a module global at call time, so the harness patches the attribute between runs instead of restarting the process.
+
+**Rate limiting is a first-class concern, not an afterthought.** Gemini free-tier quotas are small — some models allow only **20 requests per day** — and one self-healing run can issue up to 5 LLM calls. A 429 mid-eval is expected, so the harness backs off exponentially and retries the whole question; a question that still fails after 5 attempts is recorded as an error rather than silently dropped. Quotas are per-model, so eval runs use a `-lite` model via `GEMINI_MODEL` while the demo uses the standard one.
+
+Every gold query is validated against the live schema before use — a broken gold query would silently corrupt the metric rather than fail loudly.
+
+See [../eval/README.md](../eval/README.md) for usage.
+
+---
+
 ## 7. End-to-End Execution Flow
 
 1. **Ingestion** — the user submits a question (e.g. "Who earns more than 80000 in Engineering?").

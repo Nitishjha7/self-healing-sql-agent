@@ -106,6 +106,24 @@ def _contains_match(gold: list[dict], agent: list[dict]) -> bool:
     return True
 
 
+# A bare column listing with no relationship line, no example values, and no
+# "you must join" warning. This is what a schema description looks like when it
+# is generated from introspection instead of hand-tuned — i.e. what most real
+# deployments actually have. Running the eval against this is how we measure the
+# self-healing loop under conditions where it has something to heal.
+DEGRADED_SCHEMA = (
+    "Table: departments\n"
+    "Columns: id, name, budget, location\n"
+    "\n"
+    "Table: employees\n"
+    "Columns: id, name, department_id, salary, role\n"
+)
+
+
+def _degraded_schema() -> str:
+    return DEGRADED_SCHEMA
+
+
 def _run_one(question: str, delay: float) -> dict:
     """Run the agent once, retrying the whole question through rate limits."""
     for attempt in range(MAX_BACKOFF_ATTEMPTS):
@@ -195,9 +213,21 @@ def main() -> None:
     parser.add_argument("--delay", type=float, default=4.0)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--out", default="eval/results.json")
+    parser.add_argument(
+        "--degrade-schema",
+        action="store_true",
+        help="Strip the hand-tuned hints from the schema description, so the "
+        "agent has to infer joins the way it would against a real introspected "
+        "schema. This is the run where the self-healing loop actually matters.",
+    )
     args = parser.parse_args()
 
     init_db()
+
+    if args.degrade_schema:
+        # graph.py imported the function by name, so patch it on graph, not db.
+        graph_mod.get_schema_description = _degraded_schema
+        print("Schema: DEGRADED (no relationship hints, no example values)")
     questions = json.loads(QUESTIONS_PATH.read_text(encoding="utf-8"))
     if args.limit:
         questions = questions[: args.limit]

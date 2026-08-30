@@ -41,7 +41,7 @@ Honest snapshot — docs describe what exists, roadmap items are marked as such.
 - ✅ Docker Compose (`db` + `backend` + `frontend`)
 - ✅ LangSmith tracing wired (opt-in; set `LANGCHAIN_TRACING_V2=true` + an API key)
 - ✅ Two-table schema — `departments` + `employees` with a foreign key, so questions require real JOINs
-- ⬜ Evaluation harness (accuracy with retries vs without)
+- ✅ Evaluation harness — 20 questions with gold SQL, execution-accuracy metric, retries-on vs retries-off comparison ([eval/](eval/))
 - ⬜ Guardrails AI validator layer (currently prompt-level safety only)
 - ⬜ React chat UI (`frontend/` has only a Dockerfile)
 - ⬜ Deployment (Neon + Render + Vercel)

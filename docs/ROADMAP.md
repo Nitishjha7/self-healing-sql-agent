@@ -40,13 +40,20 @@
 - "Who works in Bangalore?" — location `departments` pe hai, employee `employees` pe
 - "Which department spends the most of its budget on salaries?" — JOIN + SUM + ratio
 
-### 2. Evaluation script (sabse strong proof-of-work)
-Ek `eval/questions.json` file banayenge — 15-20 natural language questions with expected SQL/answer. Ek script (`eval/run_eval.py`) sabko agent ko bhejega aur measure karega:
-- Kitne % sahi answer aaye
-- Average retries per question
-- Retry ke bina (`MAX_RETRIES=0`) vs retry ke saath accuracy ka farak
+### 2. Evaluation script (sabse strong proof-of-work) — ✅ BUILT
+`eval/questions.json` (20 questions + gold SQL + difficulty tags) aur `eval/run_eval.py` ban gaye. Details [eval/README.md](../eval/README.md) me hain.
 
-**Kyun zaroori hai:** "Maine sirf bana ke chhod diya" vs "maine apna system measure kiya" — ye farak interviewer turant pakadta hai. Numbers dikhana (e.g. "self-healing loop se accuracy 68% se 91% ho gayi") bahut strong hota hai.
+**Metric — execution accuracy:** gold SQL aur agent ka SQL dono chalate hain, **result sets** compare karte hain. SQL string match nahi (ek question ke bahut saare equally-correct SQL hote hain), aur LLM-as-judge nahi (wo reliability problem ko ek unmeasured component me daal deta — poora point hi measurement tha).
+
+**Do numbers report hote hain:**
+- **Accuracy** (headline) — gold ka answer agent ke result me contain ho, same row count ke saath
+- **Strict** — exact set-of-rows equality
+
+Relaxed headline isliye kyunki questions projection specify hi nahi karte — "Who is the highest paid employee?" ka `SELECT name` bhi sahi hai aur `SELECT name, salary, role` bhi. **Ye pehle smoke test me hi pakda gaya**: strict-only metric ne ek bilkul sahi answer FAIL kar diya tha kyunki agent ne extra columns diye the.
+
+**Kyun zaroori hai:** "Maine sirf bana ke chhod diya" vs "maine apna system measure kiya" — ye farak interviewer turant pakadta hai.
+
+**Rate limiting ek real problem nikli:** Gemini free tier kuch models pe sirf **20 requests/day** deta hai, aur ek self-healing run 5 tak LLM calls karta hai. Harness me exponential backoff + poora-question retry daalna pada. Quota per-model hoti hai, isliye eval `-lite` model pe chalta hai (`GEMINI_MODEL` env var), demo standard model pe.
 
 ### 3. Frontend chat UI
 React + Vite se simple chat interface — question input, answer bubble, aur ek collapsible "Show SQL & steps" section jo `logs` array dikhaye (transparency/explainability dikhane ke liye).
