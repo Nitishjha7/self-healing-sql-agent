@@ -10,5 +10,10 @@ langchain-google-genai==2.0.1
 # langchain-core>=0.3 compatible version when that node is actually built.
 sqlalchemy==2.0.35
 psycopg2-binary==2.9.9
+# Conversation memory: durable per-thread checkpoints in the Postgres that is
+# already part of this stack. psycopg 3 is the driver langgraph-checkpoint
+# requires - SQLAlchemy above still uses psycopg2, so both are present.
+langgraph-checkpoint-postgres==3.0.5
+psycopg[binary,pool]==3.3.5
 python-dotenv==1.0.1
 pydantic==2.9.2

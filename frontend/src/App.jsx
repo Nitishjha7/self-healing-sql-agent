@@ -13,11 +13,39 @@ const EXAMPLES = [
   "Delete all employees from HR",
 ];
 
+// Follow-ups that only make sense with conversation memory — each one refers
+// back instead of naming its subject. Shown after the first answer, because
+// before that there is nothing to refer to.
+const FOLLOW_UPS = [
+  "How many people work there?",
+  "What is that department's budget?",
+  "Who is the highest paid among them?",
+];
+
+// The conversation id is generated client-side and kept for the tab's lifetime.
+// Server-generated ids would mean cookies or session state; this API is
+// deliberately stateless apart from what the checkpointer stores under this key.
+function newThreadId() {
+  return `web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 export default function App() {
   const [turns, setTurns] = useState([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [threadId, setThreadId] = useState(newThreadId);
+  const [memoryActive, setMemoryActive] = useState(null);
   const bottomRef = useRef(null);
+
+  // A new thread id is all it takes to start over: the old conversation stays
+  // checkpointed under its own key, this one simply has no history yet.
+  function newConversation() {
+    if (loading) return;
+    setTurns([]);
+    setInput("");
+    setMemoryActive(null);
+    setThreadId(newThreadId());
+  }
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -35,7 +63,7 @@ export default function App() {
       const res = await fetch(`${API_BASE}/api/query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: trimmed }),
+        body: JSON.stringify({ question: trimmed, thread_id: threadId }),
       });
 
       if (res.status === 429) {
@@ -47,6 +75,11 @@ export default function App() {
       if (!res.ok) throw new Error(`Backend returned ${res.status}`);
 
       const data = await res.json();
+      // The backend reports whether memory was actually active, not just
+      // requested — the checkpointer can fail to set up and the agent then runs
+      // stateless. Showing "memory on" in that case would be a lie the user
+      // only discovers when a follow-up goes wrong.
+      setMemoryActive(Boolean(data.memory_active));
       setTurns((prev) => {
         const next = [...prev];
         next[next.length - 1] = { ...next[next.length - 1], ...data };
@@ -73,8 +106,28 @@ export default function App() {
           <h1>Self-Healing SQL Agent</h1>
           <p className="sub">
             Ask in plain English. If the generated SQL fails, the agent reads the
-            database error and rewrites the query — up to 3 times.
+            database error and rewrites the query — up to 3 times. Follow-up
+            questions can refer back to earlier answers.
           </p>
+        </div>
+        <div className="header-actions">
+          {memoryActive !== null && (
+            <span
+              className={`badge ${memoryActive ? "ok" : "warn"}`}
+              title={
+                memoryActive
+                  ? "Conversation is checkpointed in Postgres — follow-ups can refer back."
+                  : "The checkpointer is not available, so each question is answered on its own."
+              }
+            >
+              {memoryActive ? "Memory on" : "Memory off"}
+            </span>
+          )}
+          {turns.length > 0 && (
+            <button className="toggle" onClick={newConversation} disabled={loading}>
+              New conversation
+            </button>
+          )}
         </div>
       </header>
 
