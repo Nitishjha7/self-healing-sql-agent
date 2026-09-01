@@ -1,11 +1,12 @@
 import os
 import re
-from typing import List, TypedDict
+from typing import List, Optional, TypedDict
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import END, StateGraph
 
+from app.checkpointer import get_checkpointer
 from app.db import get_schema_description, run_sql
 
 # Env se override ho sakta hai — eval harness isko 0 set karke measure karta hai
@@ -192,6 +193,23 @@ def should_retry(state: AgentState) -> str:
     return "success"
 
 
+def _append_turn(state: AgentState, answer: str) -> List[ConversationTurn]:
+    """History me is turn ka record jodta hai.
+
+    Sirf yahi ek function history likhta hai — `synthesize_and_validate` graph ka
+    aakhri node hai, to yahan tak pahunchne ka matlab hai turn poora ho chuka.
+    Beech ke nodes me append karna retry loop me ek hi turn ko teen baar likh
+    deta (`generate_sql` retry pe dobara chalta hai).
+    """
+    return (state.get("history") or []) + [
+        {
+            "question": state["question"],
+            "sql_query": state.get("sql_query", ""),
+            "answer": answer,
+        }
+    ]
+
+
 def synthesize_and_validate(state: AgentState) -> AgentState:
     logs = state.get("logs", [])
 
@@ -241,10 +259,15 @@ def synthesize_and_validate(state: AgentState) -> AgentState:
         ]
     )
     logs.append("Synthesized final answer.")
-    return {**state, "final_answer": response.content, "logs": logs}
+    return {
+        **state,
+        "final_answer": response.content,
+        "logs": logs,
+        "history": _append_turn(state, response.content),
+    }
 
 
-def build_graph():
+def build_graph(checkpointer=None):
     graph = StateGraph(AgentState)
     graph.add_node("generate_sql", generate_sql)
     graph.add_node("execute_sql", execute_sql)
@@ -263,12 +286,40 @@ def build_graph():
     )
     graph.add_edge("synthesize_and_validate", END)
 
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer)
 
 
-def run_agent(question: str) -> AgentState:
-    app = build_graph()
-    initial_state: AgentState = {
+# Compiled graphs cache. Pehle har request `build_graph()` chalati thi, jo bina
+# checkpointer ke sirf fizool tha — ab galat bhi hota, kyunki checkpointer ke
+# peeche connection pool hai aur har request pe naya pool kholna leak hai.
+_graphs: dict = {}
+
+
+def _get_graph(checkpointer=None):
+    key = "memory" if checkpointer is not None else "stateless"
+    if key not in _graphs:
+        _graphs[key] = build_graph(checkpointer)
+    return _graphs[key]
+
+
+def run_agent(question: str, thread_id: Optional[str] = None) -> AgentState:
+    """Ek sawaal chalao. `thread_id` do to wo conversation continue hoti hai.
+
+    `thread_id` ke bina behaviour bilkul pehle jaisa hai — stateless, koi memory
+    nahi. Eval harness aur tests isi path pe chalte hain, aur yahi unke liye sahi
+    hai: har eval question independent hona chahiye, warna pehle sawaal ka jawab
+    agle ka score badal dega.
+    """
+    checkpointer = get_checkpointer() if thread_id else None
+    app = _get_graph(checkpointer)
+
+    # **Har naye sawaal pe per-turn fields explicitly reset.** Checkpointer ke
+    # saath ye zaroori hai: LangGraph is dict ko checkpointed state ke upar merge
+    # karta hai, to jo key yahan nahi hai wo pichhle turn se aage carry hoti hai.
+    # `history` jaan-boojh ke chhodi hai — usi ko carry hona chahiye. Baaki sab
+    # reset hona chahiye, warna pichhle turn ki retries agle turn ko turant
+    # "give up" pe dhakel dengi aur trace me purane sawaal ki lines dikhengi.
+    turn_input: dict = {
         "question": question,
         "sql_query": "",
         "query_result": "",
@@ -277,4 +328,9 @@ def run_agent(question: str) -> AgentState:
         "final_answer": "",
         "logs": [],
     }
-    return app.invoke(initial_state)
+
+    if checkpointer is None:
+        turn_input["history"] = []
+        return app.invoke(turn_input)
+
+    return app.invoke(turn_input, config={"configurable": {"thread_id": thread_id}})
