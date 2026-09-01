@@ -19,7 +19,21 @@ GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 BLOCKED_KEYWORDS = ("DROP", "DELETE", "UPDATE", "INSERT", "ALTER", "TRUNCATE")
 
 
+# Ek conversation me kitne pichhle turns prompt me bhejne hain. Poori history
+# bhejna do tarah se mehnga hai — tokens, aur dhyaan: bees turn purani baat
+# aksar current sawaal se koi rishta nahi rakhti, par model use context maan ke
+# usme se entities utha leta hai. Teen follow-up chain ke liye kaafi hai.
+HISTORY_TURNS_IN_PROMPT = int(os.environ.get("HISTORY_TURNS_IN_PROMPT", "3"))
+
+
+class ConversationTurn(TypedDict):
+    question: str
+    sql_query: str
+    answer: str
+
+
 class AgentState(TypedDict):
+    # --- per-turn: har naye sawaal pe reset hote hain -----------------------
     question: str
     sql_query: str
     query_result: str
@@ -27,6 +41,28 @@ class AgentState(TypedDict):
     retry_count: int
     final_answer: str
     logs: List[str]
+
+    # --- per-conversation: turns ke beech zinda rehte hain ------------------
+    history: List[ConversationTurn]
+    """Pichhle turns, checkpointer ke through carry hote hue.
+
+    **Checkpointer aa jaane ke baad ye batana zaroori ho jaata hai ki kaunsi
+    field kis scope ki hai.** Bina memory ke har invocation khaali state se
+    shuru hoti thi, to sawaal uthta hi nahi tha. Ab state turns ke beech survive
+    karti hai — aur agar `retry_count` ya `logs` bhi survive kar jaayein to
+    pichhle turn ki do retries agle turn ko turant "give up" pe dhakel dengi,
+    aur trace me pichhle sawaal ki lines dikhengi.
+
+    Isliye `run_agent` har naye sawaal pe upar wali saari fields explicitly
+    reset karta hai, aur `history` ko chhodta hai. Yahi ek line ye tay karti hai
+    ki memory feature hai ya bug.
+
+    Reducer (`Annotated[..., operator.add]`) jaan-boojh ke nahi lagaya: nodes
+    `{**state, ...}` return karte hain, to har node poori history wapas bhejta
+    hai — additive reducer use har baar dobara jod deta aur history exponentially
+    badhti. Overwrite semantics ke saath sirf `synthesize_and_validate` isme ek
+    turn add karta hai, ek hi jagah, ek hi baar.
+    """
 
 
 def _llm() -> ChatGoogleGenerativeAI:
@@ -44,13 +80,47 @@ def _extract_sql(text: str) -> str:
     return sql.strip().rstrip(";")
 
 
+def _format_history(history: List[ConversationTurn]) -> str:
+    """Pichhle turns ko prompt ke ek block me badalta hai.
+
+    **Sirf checkpointer se follow-up kaam nahi karte.** Checkpointer state ko
+    durable banata hai; par jab tak wo state prompt me nahi jaati, model ke liye
+    "unme se kitne Bangalore me hain?" ek adhoora vaakya hai. Memory = durable
+    state **+** us state ka prompt me pahunchna. Dono chahiye.
+
+    Har turn ka SQL bhi bhejte hain, sirf answer nahi — agar pichhla sawaal
+    "highest average salary wala department" tha, to us SQL me `GROUP BY d.name
+    ORDER BY AVG(e.salary) DESC LIMIT 1` likha hai, jo model ko exactly batata
+    hai ki "unme se" ka referent kya hai. Angrezi answer se ye kam saaf hota hai.
+    """
+    if not history:
+        return ""
+
+    recent = history[-HISTORY_TURNS_IN_PROMPT:]
+    lines = ["Earlier in this conversation:"]
+    for i, turn in enumerate(recent, 1):
+        lines.append(f"{i}. User asked: {turn['question']}")
+        if turn.get("sql_query"):
+            lines.append(f"   SQL used: {turn['sql_query']}")
+        if turn.get("answer"):
+            lines.append(f"   Answer given: {turn['answer']}")
+    lines.append(
+        "\nIf the new question refers back to those results using words like "
+        "'them', 'those', 'that department' or 'it', resolve the reference from "
+        "the conversation above and write a self-contained query."
+    )
+    return "\n".join(lines) + "\n\n"
+
+
 def generate_sql(state: AgentState) -> AgentState:
     schema = get_schema_description()
     logs = state.get("logs", [])
+    history_block = _format_history(state.get("history") or [])
 
     if state.get("error"):
         prompt = (
             f"Schema:\n{schema}\n\n"
+            f"{history_block}"
             f"Question: {state['question']}\n\n"
             f"Previous SQL attempt:\n{state['sql_query']}\n\n"
             f"That query failed with this error:\n{state['error']}\n\n"
@@ -61,12 +131,19 @@ def generate_sql(state: AgentState) -> AgentState:
     else:
         prompt = (
             f"Schema:\n{schema}\n\n"
+            f"{history_block}"
             f"Question: {state['question']}\n\n"
             "Write a single PostgreSQL SELECT query that answers this question. "
             "Join across tables where the question needs data from more than one. "
             "Return ONLY the SQL query, no explanation."
         )
-        logs.append("Generating initial SQL query.")
+        if history_block:
+            logs.append(
+                f"Generating initial SQL query (with {len(state.get('history') or [])} "
+                "earlier turn(s) as context)."
+            )
+        else:
+            logs.append("Generating initial SQL query.")
 
     response = _llm().invoke(
         [
@@ -124,7 +201,15 @@ def synthesize_and_validate(state: AgentState) -> AgentState:
             f"after {MAX_RETRIES} attempts. Last error: {state['error']}"
         )
         logs.append("Giving up after max retries.")
-        return {**state, "final_answer": answer, "logs": logs}
+        # Failed turn bhi history me jaata hai. Chhodne se agla follow-up chup-chaap
+        # ek aise turn ko refer karta jo kabhi hua hi nahi — aur "usme se kitne"
+        # ka jawab pichhle *safal* turn se aata, jo galat ban jaata.
+        return {
+            **state,
+            "final_answer": answer,
+            "logs": logs,
+            "history": _append_turn(state, answer),
+        }
 
     response = _llm().invoke(
         [
