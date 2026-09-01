@@ -12,6 +12,18 @@
 .header {
   padding: 32px 0 20px;
   border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
 }
 
 .header h1 {
@@ -201,6 +213,12 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+/* Follow-up suggestions sit under the last answer, indented to read as a
+   continuation of the conversation rather than a fresh empty-state prompt. */
+.follow-ups {
+  margin: 4px 0 8px 12px;
 }
 
 .chip {
