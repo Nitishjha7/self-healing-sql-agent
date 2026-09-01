@@ -152,6 +152,19 @@ export default function App() {
         {turns.map((turn, i) => (
           <Turn key={i} turn={turn} pending={loading && i === turns.length - 1} />
         ))}
+
+        {/* Only offered once an answer exists to refer back to, and only when
+            memory is actually on — suggesting "how many work there?" with the
+            checkpointer down would set the user up to watch it fail. */}
+        {memoryActive && !loading && turns.some((t) => t.final_answer) && (
+          <div className="chips follow-ups">
+            {FOLLOW_UPS.map((q) => (
+              <button key={q} className="chip" onClick={() => ask(q)}>
+                {q}
+              </button>
+            ))}
+          </div>
+        )}
         <div ref={bottomRef} />
       </main>
 
