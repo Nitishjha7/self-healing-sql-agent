@@ -16,6 +16,18 @@
 - ✅ Multi-table schema — `departments` + `employees` FK ke saath, JOIN questions ab possible hain
 - ✅ Evaluation harness + measured results — 3 conditions, [eval/RESULTS.md](../eval/RESULTS.md)
 - ✅ LangSmith tracing wired (opt-in env vars)
+- ✅ **Conversation memory** — `app/checkpointer.py` (`PostgresSaver`, lazy + fail-open),
+  `AgentState.history`, `_format_history()` prompt block, API pe `thread_id` +
+  `memory_active`, UI me "New conversation" + memory badge + follow-up chips.
+  **Verified live:** turn 1 "Which department has the highest average salary?" → Engineering;
+  turn 2 "How many people work **there**?" → `WHERE d.name = 'Engineering'` → 4.
+  Bina `thread_id` ke wahi sawaal → `SELECT COUNT(*) FROM employees` → **10, confidently galat**.
+  Backend container restart karke turn 3 bhi chala — history Postgres se wapas aayi
+  (yahi `MemorySaver` pe `PostgresSaver` choose karne ka asli reason hai).
+- ✅ **Pehle 10 tests** — `backend/tests/test_memory.py`, bina API key aur bina DB ke.
+  Sabse zaroori invariant: har naye sawaal pe per-turn fields (`retry_count`, `logs`,
+  `error`…) reset hote hain aur sirf `history` carry hoti hai. Ye sawaal checkpointer
+  se **pehle tha hi nahi** — tab har invocation khaali state se shuru hoti thi.
 - ❌ Guardrails AI validator node (optional — abhi safety prompt-level hai, docs me honestly marked)
 - ✅ Deployment guide + rate limiting + configurable CORS — [docs/DEPLOYMENT.md](DEPLOYMENT.md)
 - ❌ Actually deployed (live URL abhi nahi hai) — bacha hua kaam [DEPLOYMENT.md](DEPLOYMENT.md) ke top pe checklist me hai
