@@ -57,7 +57,7 @@ Honest snapshot — docs describe what exists, roadmap items are marked as such.
 
 ```
 Dockerfile  Single-service deploy image (React build + FastAPI)
-backend/    FastAPI app, LangGraph agent
+backend/    FastAPI app, LangGraph agent, Postgres checkpointer, tests
 frontend/   React + Vite chat UI, Nginx-served with an /api proxy
 eval/       Evaluation harness, gold questions, measured results
 docs/       Setup, technical spec, code notes, roadmap, interview notes, deployment

@@ -268,3 +268,59 @@ Render Blueprint — service settings version control me rakhta hai (dashboard m
 **Database yahan define nahi ki** — Render ka free Postgres **30 din baad expire** ho jaata hai. Portfolio link chupchaap mar jaata aur pata bhi na chalta. Neon free tier expire nahi hota.
 
 **Secrets `sync: false`** — matlab value Render dashboard me daalni hai, YAML me nahi. Blueprint commit hota hai; usme API key likhna wahi galti hai jo `.env.example` me key daalna thi.
+
+## backend/app/checkpointer.py — conversation memory (baad me add hua)
+
+**Kya:** ek process-wide `PostgresSaver`, lazy banta hai aur fail-open hai.
+
+**Kyun Postgres, `MemorySaver` kyun nahi:** `MemorySaver` state process me rakhta
+hai. Render ka free tier 15 min me sota hai — user wapas aake follow-up poochta
+hai aur conversation gayab. Postgres is stack me pehle se hai, to durability ke
+liye koi naya service nahi lagta. **Verified:** conversation ke beech backend
+container restart kiya, phir usi thread pe "that department's budget?" poocha —
+history Postgres se wapas aayi aur reference sahi resolve hua.
+
+**Kyun `pool` aur `autocommit=True`:** `PostgresSaver` ke peeche connection pool
+hai, isliye ek hi baar banta hai (har request pe naya pool = connection leak).
+`autocommit` ke bina checkpoint writes ek khuli transaction me latak jaate hain
+aur agli request unhe dekh hi nahi paati.
+
+**Kyun fail-open:** DB tak pahunch na ho to app crash nahi karti, memory chup-chaap
+off ho jaati hai — par API `memory_active: false` lautati hai. Feature down hona
+ek cheez hai; **chupke se** down hona doosri, kyunki tab user ko lagta hai agent
+bhool gaya jabki memory kabhi on hi nahi thi.
+
+## graph.py — `history`, aur per-turn vs per-conversation state
+
+**Sabse zaroori baat:** checkpointer akela follow-up kaam nahi karata. Wo state ko
+durable banata hai; model checkpoint padh nahi sakta. Purane turns ka prompt me
+pahunchna bhi utna hi zaroori hai — `_format_history()` wahi karta hai.
+
+Har turn ka **SQL** bhi bhejte hain, sirf angrezi answer nahi: `ORDER BY
+AVG(e.salary) DESC LIMIT 1` ye baat answer se zyada saaf batata hai ki "them"
+kiski baat hai.
+
+**Aur wo cheez jo checkpointer ne naya paida ki:** ab state turns ke beech survive
+karti hai, to har field ka scope tay karna padta hai. `run_agent` ka input dict
+checkpointed state ke **upar merge** hota hai — jo key usme nahi hogi wo pichhle
+turn se carry ho jaayegi. `history` ko carry hona chahiye; `retry_count`, `logs`,
+`error` ko **bilkul nahi** — warna pichhle turn ki 3 retries agle turn ke pehle hi
+error pe "give up" karwa dengi, aur trace me pichhle sawaal ki lines dikhengi.
+Isliye `run_agent` per-turn fields explicitly reset karta hai. Yahi ek line memory
+feature aur memory bug ka farak hai.
+
+`history` pe additive reducer (`Annotated[..., operator.add]`) jaan-boojh ke nahi
+lagaya: nodes `{**state, ...}` return karte hain, to har node poori history wapas
+bhejta hai — reducer use har baar dobara jod deta aur history exponentially badhti.
+Overwrite semantics ke saath sirf `synthesize_and_validate` ek turn add karta hai,
+graph ka aakhri node, jo har turn me theek ek baar chalta hai (`generate_sql`
+retry loop me dobara chalta hai — wahan append karna ek turn ki teen entries banata).
+
+## backend/tests/ — is project ke pehle tests
+
+10 tests, bina API key aur bina database ke. Ye memory ki **semantics** test karte
+hain, model ki quality nahi — kaunsi state carry hoti hai aur kaunsi reset, ye poora
+sawaal LLM ke bahar hai. Gemini free tier 20 requests/day deta hai; us quota ko un
+tests pe kharch karna jo usse kuch seekh hi nahi rahe, seedha nuksan hai.
+
+`Dockerfile.test` isliye ki is machine pe local Python nahi hai.
