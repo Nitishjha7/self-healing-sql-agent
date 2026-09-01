@@ -1,0 +1,10 @@
+# Test image — LLM-free seams ko bina API key aur bina Postgres ke chalata hai.
+# Is machine pe local Python nahi hai, isliye tests bhi container me chalte hain.
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt pytest
+COPY app ./app
+COPY tests ./tests
+COPY pytest.ini .
+CMD ["python", "-m", "pytest", "-q"]
