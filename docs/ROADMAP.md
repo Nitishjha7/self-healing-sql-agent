@@ -146,6 +146,25 @@ Purane steps neeche reference ke liye:
 
 ---
 
+## Future — beyond the interview-ready scope
+
+In wo priorities me shaamil nahi hai (jo sab upar "interview-focused" hain), lekin agli badi feature direction ye hai — dono planned only hain, abhi implement nahi hui:
+
+### Phase 5 (planned): AI-generated dashboards
+Abhi agent sirf ek sawaal → ek answer deta hai (chat mode). Dashboard mode isi ke upar layer hoga, replace nahi karega:
+- User bole "Create a dashboard for department performance" → agent multiple related questions me todta hai, har ek ke liye existing self-healing `generate_sql` → `execute_sql` loop chalata hai
+- Result sets analyze karke har ek ke liye chart type suggest karta hai (KPI card / bar / donut / table)
+- Frontend me naya "Dashboard" tab hoga, existing "Chat" tab ke saath — dono coexist karenge
+- Har widget ka "View SQL" available rahega (transparency wahi principle jo chat mode me hai)
+- Chat se follow-up karke dashboard modify karna bhi possible hoga ("Add employee count to this")
+
+### Phase 6 (planned): Power BI export
+Generated dashboard ka data + queries Power BI me export, taaki user AI-generated analytics ko apne existing Power BI workflow me continue kar sake.
+
+**Kyun abhi nahi:** Ye dono naye subsystem hain (multi-query orchestration, chart-type inference, naya UI surface) — interview-ready core (self-healing + memory + eval) complete hone ke baad hi shuru karna sahi hai, taaki scope creep se core weak na ho.
+
+---
+
 ## Order of Execution
 
 1. Multi-table schema
