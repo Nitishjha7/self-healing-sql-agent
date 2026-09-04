@@ -155,6 +155,8 @@ Near-term priorities are in [docs/ROADMAP.md](docs/ROADMAP.md). Longer term:
 - **Phase 2**: Model Context Protocol (MCP) — talk to the database through a Postgres MCP server over stdio instead of a direct driver.
 - **Phase 3**: Human-in-the-Loop (HITL) approval for destructive queries, replacing the current hard block.
 - **Phase 4**: ~~Postgres checkpointer for cross-session memory~~ — ✅ built, see [Conversation memory](#conversation-memory). Multi-tenant isolation (one namespace per user, not just per thread) is still open.
+- **Phase 5 (planned)**: AI-generated dashboards — a "Create a dashboard for X" request runs several self-healing queries, picks a chart type per result set (KPI card, bar, donut, table), and renders them together, alongside the existing single-question chat mode rather than replacing it.
+- **Phase 6 (planned)**: Power BI export — send a generated dashboard's datasets and queries to Power BI so a user can keep customizing and sharing it there.
 
 ## Positioning
 
