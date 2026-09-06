@@ -145,6 +145,32 @@ def run_sql(query: str):
         return rows
 
 
+def run_write(query: str, commit: bool) -> int:
+    """Data badalne wala statement chalata hai, affected row count deta hai.
+
+    `run_sql` se alag jaan-boojh ke: `run_sql` contract se read-only hai aur uska
+    caller maan ke chalta hai ki result set aayega. Write ke paas rows hoti hi
+    nahi (`result.keys()` wahan error deta hai), aur dono ko ek function me mila
+    dena wahi tareeka hai jisse ek "read-only" helper chupke se data badalne
+    lagta hai.
+
+    **`commit=False` pe statement phir bhi chalta hai** — Postgres use plan karta
+    hai, saare constraints aur foreign keys enforce karta hai, aur batata hai
+    kitni rows par asar padta — uske baad rollback ho jaata hai. Isi wajah se
+    approval flow ek public deployment pe demo ho sakta hai bina visitors ko
+    table khaali karne ki taakat diye. Report me ye kabhi chhupaya nahi jaata:
+    user ko saaf bola jaata hai ki rollback hua.
+    """
+    with engine.connect() as conn:
+        result = conn.execute(text(query))
+        affected = result.rowcount
+        if commit:
+            conn.commit()
+        else:
+            conn.rollback()
+        return affected
+
+
 if __name__ == "__main__":
     init_db()
     print("Database initialized and seeded.")

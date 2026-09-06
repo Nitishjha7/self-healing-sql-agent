@@ -7,7 +7,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import END, StateGraph
 
 from app.checkpointer import get_checkpointer
-from app.db import get_schema_description, run_sql
+from app.db import get_schema_description, run_sql, run_write
 
 # Env se override ho sakta hai — eval harness isko 0 set karke measure karta hai
 # ki self-healing loop ke bina accuracy kitni girti hai.
@@ -18,6 +18,20 @@ MAX_RETRIES = int(os.environ.get("MAX_RETRIES", "3"))
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
 BLOCKED_KEYWORDS = ("DROP", "DELETE", "UPDATE", "INSERT", "ALTER", "TRUNCATE")
+
+# Approved write ko sach me commit karna hai ya nahi.
+#
+# `false` (default) pe approved query phir bhi **chalti** hai — Postgres use plan
+# karta hai, constraints check karta hai, affected rows batata hai — aur phir
+# rollback ho jaati hai. Isse approval flow public demo pe bhi dikhaya ja sakta
+# hai bina kisi visitor ko `DELETE FROM employees` chalane ki taakat diye.
+#
+# Ye "approval ka dikhava" nahi hai: user ko response me saaf likha jaata hai ki
+# rollback hua aur kitni rows par asar padta. Jhoot bolna aur cheez hai, safe
+# mode me chalana aur. Ye seedha usi sabak se aaya hai jo `synthesize` ke
+# read-only prompt me likha hai — action guard karna aur us action ki **report**
+# guard karna do alag zimmedariyaan hain.
+ALLOW_WRITES = os.environ.get("ALLOW_WRITES", "").lower() in ("1", "true", "yes")
 
 
 # Ek conversation me kitne pichhle turns prompt me bhejne hain. Poori history
@@ -42,6 +56,14 @@ class AgentState(TypedDict):
     retry_count: int
     final_answer: str
     logs: List[str]
+
+    approval_status: str
+    """HITL gate ki haalat: `""` | `"pending"` | `"approved"` | `"rejected"`.
+
+    Per-turn hai, per-conversation nahi — ek turn ki approval agle turn ki write
+    ko authorize nahi karti. Wahi bug hoti jo `retry_count` ke saath hoti, bas
+    isme nateeja data change hota.
+    """
 
     # --- per-conversation: turns ke beech zinda rehte hain ------------------
     history: List[ConversationTurn]
@@ -158,18 +180,102 @@ def generate_sql(state: AgentState) -> AgentState:
     return {**state, "sql_query": sql_query, "logs": logs}
 
 
+def is_destructive(sql_query: str) -> bool:
+    """SQL me koi write/DDL keyword hai ya nahi.
+
+    Substring match hai, matlab conservative — string literal me aaya "updated"
+    bhi ise trigger kar dega. Ye jaan-boojh ke hai: false positive ka anjaam ek
+    fizool approval prompt hai, false negative ka anjaam bina puche data badal
+    jaana. Asli production answer database-level read-only role hai, jise prompt
+    injection se bypass nahi kiya ja sakta — ye uski jagah nahi leta.
+    """
+    return any(keyword in sql_query.upper() for keyword in BLOCKED_KEYWORDS)
+
+
+def needs_approval(state: AgentState) -> str:
+    """`generate_sql` ke baad ka conditional edge: approval chahiye ya seedha chalao."""
+    if is_destructive(state.get("sql_query", "")):
+        return "approval"
+    return "execute"
+
+
+def await_approval(state: AgentState) -> AgentState:
+    """HITL gate. Graph is node se **pehle** rukta hai (`interrupt_before`).
+
+    Node khud tab chalta hai jab conversation resume hoti hai, matlab tab tak
+    `approval_status` insaan ke faisle se bhar chuka hota hai. Isliye ye node
+    khud kuch poochta nahi — wo faisla record karta hai, taaki trace me dikhe ki
+    ruka kis wajah se aur aage badha kis faisle pe.
+
+    **Ye alag node isliye hai** ki is LangGraph version me dynamic `interrupt()`
+    nahi hai — sirf static `interrupt_before=[...]`. `execute_sql` pe seedha
+    interrupt lagate to har query ruk jaati, sirf destructive nahi. Ek dedicated
+    node banane se pause **conditional** ho jaata hai: routing tay karti hai ki
+    is turn me gate se guzarna hai ya nahi.
+    """
+    logs = state.get("logs", [])
+    decision = state.get("approval_status", "")
+
+    if decision == "approved":
+        logs.append("Human approved the write. Proceeding.")
+    elif decision == "rejected":
+        logs.append("Human rejected the write. Nothing was executed.")
+    else:
+        # Yahan pahunchna matlab resume bina faisle ke hua. Chup-chaap chalne
+        # dena sabse kharaab option hai — gate ka poora matlab hi khatam.
+        logs.append("Resumed without a decision — treating as rejected.")
+        decision = "rejected"
+
+    return {**state, "approval_status": decision, "logs": logs}
+
+
+def after_approval(state: AgentState) -> str:
+    return "execute" if state.get("approval_status") == "approved" else "rejected"
+
+
 def execute_sql(state: AgentState) -> AgentState:
     logs = state.get("logs", [])
     sql_query = state["sql_query"]
 
-    if any(keyword in sql_query.upper() for keyword in BLOCKED_KEYWORDS):
-        logs.append("Blocked: query contains a destructive/write keyword.")
-        return {
-            **state,
-            "error": "Only read-only SELECT queries are allowed.",
-            "retry_count": MAX_RETRIES,
-            "logs": logs,
-        }
+    if is_destructive(sql_query):
+        # Approval mile bina yahan pahunchna sirf stateless mode me hota hai,
+        # jahan checkpointer nahi hai to interrupt bhi possible nahi. Wahan
+        # purana hard block hi sahi behaviour hai — approval prompt dikhana
+        # jise honour hi nahi kiya ja sakta, uska koi matlab nahi.
+        if state.get("approval_status") != "approved":
+            logs.append("Blocked: query contains a destructive/write keyword.")
+            return {
+                **state,
+                "error": "Only read-only SELECT queries are allowed.",
+                "retry_count": MAX_RETRIES,
+                "logs": logs,
+            }
+
+        try:
+            affected = run_write(sql_query, commit=ALLOW_WRITES)
+        except Exception as exc:
+            logs.append(f"Execution failed: {exc}")
+            return {
+                **state,
+                "error": str(exc),
+                "retry_count": state.get("retry_count", 0) + 1,
+                "logs": logs,
+            }
+
+        if ALLOW_WRITES:
+            logs.append(f"Write committed, {affected} row(s) affected.")
+            result = f"Write committed. {affected} row(s) affected."
+        else:
+            logs.append(
+                f"Write executed and rolled back (ALLOW_WRITES is off), "
+                f"{affected} row(s) would have been affected."
+            )
+            result = (
+                f"The statement ran against the database and was then rolled back "
+                f"because this deployment does not permit writes. It would have "
+                f"affected {affected} row(s). Nothing was actually changed."
+            )
+        return {**state, "query_result": result, "error": "", "logs": logs}
 
     try:
         rows = run_sql(sql_query)
