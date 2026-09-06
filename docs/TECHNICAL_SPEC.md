@@ -93,16 +93,19 @@ Empirically, genuine syntax/schema mistakes are corrected on the first or second
 
 ```python
 class AgentState(TypedDict):
-    question: str       # Original natural language question
-    sql_query: str      # Most recently generated SQL statement
-    query_result: str   # Raw database output (stringified rows)
-    error: str          # Exception message; empty string means success
-    retry_count: int    # Current retry iteration (ceiling: MAX_RETRIES = 3)
-    final_answer: str   # Validated natural language response
-    logs: List[str]     # Step-by-step trace logs for UI visibility
+    question: str                  # Original natural language question
+    sql_query: str                 # Most recently generated SQL statement
+    query_result: str              # Raw database output (stringified rows)
+    error: str                     # Exception message; empty string means success
+    retry_count: int               # Current retry iteration (ceiling: MAX_RETRIES = 3)
+    final_answer: str              # Validated natural language response
+    logs: List[str]                # Step-by-step trace logs for UI visibility
+    history: List[ConversationTurn]  # Prior turns, carried by the checkpointer
 ```
 
 `logs` is threaded through every node, so the API can return the complete decision trace — this is the explainability story, and the most demo-worthy part of the response payload.
+
+`history` is what makes a follow-up question mean anything; see §6c.
 
 ---
 
@@ -170,10 +173,19 @@ The schema is handed to the LLM as a plain-text description from `get_schema_des
 
 | Endpoint | Method | Body | Response |
 |---|---|---|---|
-| `/health` | GET | — | `{"status": "ok"}` — Docker healthcheck |
-| `/query` | POST | `{"question": str}` | `{question, sql_query, final_answer, logs, retry_count}` |
+| `/health` | GET | — | `{"status": "ok"}` — platform healthcheck and uptime pingers |
+| `/api/health` | GET | — | Same, for the SPA |
+| `/api/query` | POST | `{"question": str, "thread_id": str \| null}` | `{question, sql_query, final_answer, logs, retry_count, thread_id, memory_active}` |
 
-`init_db()` runs on FastAPI startup, so table creation and seeding need no manual step. CORS is currently `allow_origins=["*"]` for local development — a known item to tighten to the deployed frontend origin before deployment.
+Everything the SPA calls lives under `/api` so it cannot collide with a static file path once the built frontend is mounted at `/` (see §8). The bare `/health` is kept at the root because platform health checks and uptime pingers expect it there; both health routes are exempt from rate limiting so a keep-alive ping can never throttle the service it is keeping alive.
+
+`thread_id` is optional. Omit it and the API behaves exactly as it did before conversation memory existed — which is what the eval harness and tests rely on. `memory_active` reports whether memory *actually* engaged, which is not the same as having sent a `thread_id`: checkpointer setup can fail (database unreachable, permissions) and the agent then runs stateless on purpose. Surfacing that distinction matters because a silently-stateless agent looks to the user like an agent that forgot.
+
+`init_db()` runs on FastAPI startup, so table creation and seeding need no manual step.
+
+**Rate limiting [Implemented]** — `/api/query` is limited per IP (default 5 requests per 60s, env-tunable). This is not polish: the public demo runs on a free Gemini tier of roughly 15 requests per minute shared across every visitor, so without a limit one enthusiastic visitor exhausts the quota and everyone after them sees errors. The limiter is in-memory by design — correct for a single container, wrong for multiple replicas, where a shared store would be needed.
+
+**CORS** — `ALLOWED_ORIGINS` defaults to `*`. The single-service deployment serves the SPA from this same app, so there is no cross-origin caller to allow and the rate limiter is the real control. A split deployment should name the frontend origin explicitly.
 
 ---
 
@@ -230,6 +242,46 @@ See [../eval/README.md](../eval/README.md) for usage.
 
 ---
 
+## 6c. Conversation Memory — Postgres Checkpointer **[Implemented]**
+
+Without memory, every `/api/query` starts from an empty state, so a follow-up like *"how many of those are in Bangalore?"* is a meaningless sentence — the agent has no referent for "those". LangGraph's checkpointer makes graph state survive between invocations, keyed by `thread_id`.
+
+### Memory is two things, and both are required
+
+A checkpointer alone does **not** make follow-ups work. It makes state *durable*; it does not put that state in front of the model. So `AgentState` carries a `history` list, and `_format_history()` renders the recent turns into the generation prompt. Durable state **plus** that state reaching the prompt — either half alone does nothing.
+
+The rendered history includes **each turn's SQL, not just its answer**. If the previous question was "which department has the highest average salary?", the SQL contains `GROUP BY d.name ORDER BY AVG(e.salary) DESC LIMIT 1` — which tells the model precisely what "those" refers to. An English answer conveys that far less exactly.
+
+Only the last `HISTORY_TURNS_IN_PROMPT` turns (default 3) go in. Sending everything costs tokens, but the sharper problem is attention: a twenty-turn-old exchange usually has nothing to do with the current question, yet the model treats it as context and lifts entities out of it.
+
+### Which state is per-turn and which is per-conversation
+
+This distinction did not exist before the checkpointer, because every invocation started clean. Now state survives, and LangGraph **merges** the input dict over the checkpointed state — so any key not present in the input carries forward.
+
+That makes `run_agent` explicitly reset `question`, `sql_query`, `query_result`, `error`, `retry_count`, `final_answer` and `logs` on every new question, and deliberately omit `history`. Getting this wrong is not a subtle degradation: a previous turn's two retries would push the next question straight to "give up", and the trace shown in the UI would contain the *previous* question's lines. One decision separates a memory feature from a memory bug.
+
+`history` deliberately has **no** additive reducer (`Annotated[..., operator.add]`). Nodes return `{**state, ...}`, so each one already returns the whole history; an additive reducer would re-append it at every node and grow the list exponentially. With overwrite semantics, exactly one place appends exactly one turn — `synthesize_and_validate`, via `_append_turn`. Failed turns are recorded too: dropping them would let the next follow-up silently reference a turn the model cannot see.
+
+### Why Postgres, and why it is allowed to fail
+
+`MemorySaver` would work until the process restarts. On Render's free tier the container sleeps after 15 minutes; a user returning to ask a follow-up would find the conversation gone. Postgres is already in this stack, so durable checkpointing costs no new service.
+
+Setup is wrapped in a `try`/`except` and returns `None` on failure — the agent then runs stateless. That fallback is intentional: a chat app losing its memory feature is one kind of outage, the app failing to start is a worse one. It is deliberately **not** silent, though; the API returns `memory_active` so the UI can tell the user whether follow-ups will work, rather than leaving them to conclude the agent has forgotten.
+
+The checkpointer is a process-wide singleton, cached with the failure result. It owns a connection pool, and opening a new pool per request is the most direct route to a connection leak. Compiled graphs are cached for the same reason (`_graphs`, keyed stateless/memory) — rebuilding per request was merely wasteful before and is incorrect now.
+
+`autocommit=True` on the pool is load-bearing: `PostgresSaver` assumes each checkpoint write commits itself, and without it writes sit in an open transaction that the next request cannot see.
+
+### Configuration
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DISABLE_CHECKPOINTER` | unset | Force stateless mode even with a database available |
+| `CHECKPOINTER_POOL_SIZE` | `5` | Connection pool ceiling |
+| `HISTORY_TURNS_IN_PROMPT` | `3` | Prior turns rendered into the prompt |
+
+---
+
 ## 7. End-to-End Execution Flow
 
 1. **Ingestion** — the user submits a question (e.g. "Who earns more than 80000 in Engineering?").
@@ -263,4 +315,4 @@ Near-term, interview-focused priorities are in [ROADMAP.md](ROADMAP.md) — mult
 |---|---|---|
 | Phase 2 | Model Context Protocol (MCP) | Replace the direct SQLAlchemy driver with a standard Postgres MCP server over stdio, so the data access layer becomes a swappable tool rather than hard-wired code |
 | Phase 3 | Human-in-the-Loop (HITL) | LangGraph interrupt before executing destructive queries, replacing today's hard block with an approval pause |
-| Phase 4 | Postgres checkpointer | Cross-session conversation memory and multi-tenant isolation via LangGraph's persistence layer |
+| ~~Phase 4~~ | ~~Postgres checkpointer~~ | ✅ **Done** — see §6c. Cross-session conversation memory via LangGraph's persistence layer. Multi-tenant isolation is the part still outstanding: `thread_id` is client-supplied and unauthenticated, so anyone who guesses another thread's id reads that conversation. Fine for a single-user demo, not for multi-tenant use — that needs auth and a per-user namespace on the thread key |

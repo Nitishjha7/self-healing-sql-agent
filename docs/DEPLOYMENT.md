@@ -10,6 +10,7 @@ Code sab taiyar hai aur locally test ho chuka hai. Ye cheezein manually karni ha
 
 ### 1. Deploy karna (~30-40 min) — asli baccha kaam
 
+- [ ] Tests pass kar rahe hain: `docker build -f backend/Dockerfile.test -t sql-agent-test backend && docker run --rm sql-agent-test`
 - [ ] **Neon** pe free account → Postgres project → connection string copy (Step 1 neeche)
 - [ ] **Render** pe Web Service → GitHub repo connect → Docker runtime (Step 2)
 - [ ] Environment variables set karna: `DATABASE_URL`, `GOOGLE_API_KEY`, `GEMINI_MODEL`, `RATE_LIMIT_*`
@@ -90,6 +91,8 @@ Render ka free web service **15 minute inactivity ke baad so jaata hai**, aur ja
 
 > `?sslmode=require` **mat hataana** — Neon plain connection reject karta hai aur app start hi nahi hoga.
 
+> **Conversation memory bhi isi database pe chalti hai.** `PostgresSaver` apni checkpoint tables khud bana leta hai (`saver.setup()` startup pe, idempotent) — koi alag service ya migration nahi chahiye. Agar Neon tak pahunch na ho to app crash nahi karti, memory chup-chaap off ho jaati hai aur API `memory_active: false` return karti hai. Deploy ke baad ek follow-up question poochh ke confirm kar lena (Step 3).
+
 ## Step 2 — Deploy (Render)
 
 [dashboard.render.com](https://dashboard.render.com) → **New → Web Service** → GitHub repo connect karo.
@@ -133,6 +136,14 @@ curl -X POST https://YOUR-APP.onrender.com/api/query \
 
 Phir browser me URL kholo — chat UI aana chahiye. Ek question poocho aur "Show SQL & steps" khol ke trace dekho.
 
+**Conversation memory bhi check karo** (ye deploy pe hi pehli baar test hoti hai, kyunki Neon local Postgres se alag hai):
+
+- [ ] "Which department has the highest average salary?" poocho
+- [ ] Phir follow-up: **"how many people work there?"** — agar wo Engineering samajh gaya, memory chal rahi hai
+- [ ] Ya API se: response me `memory_active: true` aana chahiye jab `thread_id` bheja ho
+
+`memory_active: false` aaye to Render logs me `Checkpointer setup failed` dhundo — zyadatar `DATABASE_URL` ya Neon connection limit ka issue hota hai.
+
 ## Step 4 — Keep-alive (ye skip mat karna)
 
 Iske bina baaki sab bekaar hai — service so jaayegi aur demo 50 second leta rahega.
@@ -161,6 +172,9 @@ Render 15 minute idle pe sulaata hai, toh 10-minute ping hamesha aage rehta hai.
 | `RATE_LIMIT_REQUESTS` | — | `5` | Per IP |
 | `RATE_LIMIT_WINDOW` | — | `60` | Seconds |
 | `ALLOWED_ORIGINS` | — | `*` | Single-service me same-origin hai, isliye zaroorat nahi. Split deploy me frontend origin set karna |
+| `DISABLE_CHECKPOINTER` | — | unset | `1` karo to conversation memory band. Normally chhodo — memory chalne dena hi chahiye |
+| `CHECKPOINTER_POOL_SIZE` | — | `5` | Neon free tier ki connection limit chhoti hai; 5 se upar mat badhao |
+| `HISTORY_TURNS_IN_PROMPT` | — | `3` | Kitne pichhle turns prompt me jaate hain |
 | `LANGCHAIN_TRACING_V2` | — | `false` | `true` → traces LangSmith pe |
 | `PORT` | — | injected | Render deta hai, khud mat set karna |
 
