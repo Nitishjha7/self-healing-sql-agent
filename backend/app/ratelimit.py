@@ -26,7 +26,9 @@ WINDOW_SECONDS = int(os.environ.get("RATE_LIMIT_WINDOW", "60"))
 
 # Paths that cost an LLM call. Both /health routes stay free so uptime pingers and the
 # platform's own health checks are never throttled.
-LIMITED_PATHS = {"/api/query"}
+# /api/approve bhi yahan hai: resume ek synthesis LLM call chalata hai, to wo
+# bhi utna hi quota kharch karta hai jitna ek naya sawaal.
+LIMITED_PATHS = {"/api/query", "/api/approve"}
 
 _hits: dict[str, deque[float]] = defaultdict(deque)
 

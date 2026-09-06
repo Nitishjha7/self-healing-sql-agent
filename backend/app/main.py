@@ -1,14 +1,14 @@
 import os
 from pathlib import Path
 
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.checkpointer import get_checkpointer
 from app.db import init_db
-from app.graph import run_agent
+from app.graph import resume_agent, run_agent
 from app.ratelimit import rate_limit_middleware
 
 app = FastAPI(title="Self-Healing Data Query Agent")
@@ -45,6 +45,17 @@ class QueryRequest(BaseModel):
     """
 
 
+class ApprovalRequest(BaseModel):
+    thread_id: str
+    approved: bool
+    """Insaan ka faisla. `thread_id` yahan optional nahi hai.
+
+    Approval hamesha ek rukhi hui conversation se judi hoti hai, aur wo
+    conversation checkpointer me `thread_id` se hi mil sakti hai — bina uske
+    approve karne ko kuch hai hi nahi.
+    """
+
+
 class QueryResponse(BaseModel):
     question: str
     sql_query: str
@@ -52,6 +63,15 @@ class QueryResponse(BaseModel):
     logs: list[str]
     retry_count: int
     thread_id: str | None = None
+    awaiting_approval: bool = False
+    """Graph ek destructive query par ruka hua hai aur insaan ke faisle ka intezaar hai.
+
+    Jab ye `true` ho, `final_answer` khaali hoti hai aur `sql_query` me wo
+    statement hai jise approve karna hai. Client ko `/api/approve` call karna
+    hoga — tab tak turn poora nahi hua. Ise ek alag flag banana zaroori tha:
+    khaali `final_answer` apne aap me "kuch nahi mila" jaisa dikhta, jabki asal
+    me system user ka jawab maang raha hai.
+    """
     memory_active: bool = False
     """Kya is turn me sach me conversation memory chali.
 
@@ -78,18 +98,42 @@ def api_health() -> dict:
     return {"status": "ok"}
 
 
-@api.post("/query", response_model=QueryResponse)
-def query(request: QueryRequest) -> QueryResponse:
-    result = run_agent(request.question, thread_id=request.thread_id)
+def _to_response(result: dict, thread_id: str | None) -> QueryResponse:
     return QueryResponse(
         question=result["question"],
         sql_query=result["sql_query"],
         final_answer=result["final_answer"],
         logs=result["logs"],
         retry_count=result["retry_count"],
-        thread_id=request.thread_id,
-        memory_active=bool(request.thread_id and get_checkpointer() is not None),
+        thread_id=thread_id,
+        awaiting_approval=result.get("approval_status") == "pending",
+        memory_active=bool(thread_id and get_checkpointer() is not None),
     )
+
+
+@api.post("/query", response_model=QueryResponse)
+def query(request: QueryRequest) -> QueryResponse:
+    result = run_agent(request.question, thread_id=request.thread_id)
+    return _to_response(result, request.thread_id)
+
+
+@api.post("/approve", response_model=QueryResponse)
+def approve(request: ApprovalRequest) -> QueryResponse:
+    """Approval gate par ruki hui conversation ko aage badhata hai.
+
+    409 tab jab ye thread approval ka intezaar hi nahi kar raha — do baar
+    approve dabana, ya ek purana tab jiski conversation kab ki poori ho chuki.
+    Ye caller ki galti nahi hai aur na hi server ki kharabi; isliye na 400 na
+    500. Chup-chaap 200 lauta dena sabse bura hota — user ko lagta uska faisla
+    laga diya gaya, jabki kuch hua hi nahi.
+    """
+    result = resume_agent(request.thread_id, request.approved)
+    if result is None:
+        raise HTTPException(
+            status_code=409,
+            detail="This conversation is not waiting for an approval decision.",
+        )
+    return _to_response(result, request.thread_id)
 
 
 app.include_router(api)

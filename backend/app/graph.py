@@ -319,6 +319,22 @@ def _append_turn(state: AgentState, answer: str) -> List[ConversationTurn]:
 def synthesize_and_validate(state: AgentState) -> AgentState:
     logs = state.get("logs", [])
 
+    if state.get("approval_status") == "rejected":
+        # Rejection ko LLM se nahi likhwate. Ye ek policy outcome hai, ek fixed
+        # fact — usko generate karwana matlab model ko ye mauka dena ki wo use
+        # narrate karte hue kuch aur bol de. Yahi galti pehle "removed from the
+        # HR department" wale jhooth me nikli thi.
+        answer = (
+            "That request was not approved, so nothing was run against the "
+            "database. Nothing has been changed."
+        )
+        return {
+            **state,
+            "final_answer": answer,
+            "logs": logs,
+            "history": _append_turn(state, answer),
+        }
+
     if state.get("error"):
         answer = (
             "Sorry, I couldn't answer that question — the query kept failing "
@@ -348,11 +364,24 @@ def synthesize_and_validate(state: AgentState) -> AgentState:
                     # never touched, but the user is told it was — a false
                     # confirmation is its own kind of harm, separate from the write
                     # the guard already prevented.
-                    "This system is STRICTLY READ-ONLY: it only ever runs SELECT queries and "
-                    "never creates, updates or deletes anything. Never state or imply that data "
-                    "was added, changed, removed or otherwise modified. If the question asked for "
-                    "a modification, say plainly that you can only read data, then describe what "
-                    "the query returned."
+                    # Ye line ab conditional hai. Pehle hardcoded thi, aur ALLOW_WRITES
+                    # aane ke baad wo galat direction me jhoot bulwane lagti: ek write
+                    # jo sach me commit ho gaya, use "kuch nahi badla" batati. Guard
+                    # dono taraf lagana padta hai — na jhoothi confirmation, na jhoothi
+                    # tasalli.
+                    + (
+                        "This system runs write statements only after explicit human "
+                        "approval. Report exactly what the result says happened — if it "
+                        "says rows were affected, say so; if it says the statement was "
+                        "rolled back, say that plainly and do not imply data changed."
+                        if ALLOW_WRITES
+                        else
+                        "This system is STRICTLY READ-ONLY: it only ever runs SELECT queries and "
+                        "never creates, updates or deletes anything. Never state or imply that data "
+                        "was added, changed, removed or otherwise modified. If the question asked for "
+                        "a modification, say plainly that you can only read data, then describe what "
+                        "the query returned."
+                    )
                 )
             ),
             HumanMessage(
@@ -376,11 +405,23 @@ def synthesize_and_validate(state: AgentState) -> AgentState:
 def build_graph(checkpointer=None):
     graph = StateGraph(AgentState)
     graph.add_node("generate_sql", generate_sql)
+    graph.add_node("await_approval", await_approval)
     graph.add_node("execute_sql", execute_sql)
     graph.add_node("synthesize_and_validate", synthesize_and_validate)
 
     graph.set_entry_point("generate_sql")
-    graph.add_edge("generate_sql", "execute_sql")
+
+    # Destructive query approval gate se hoke jaati hai, baaki seedha execute.
+    graph.add_conditional_edges(
+        "generate_sql",
+        needs_approval,
+        {"approval": "await_approval", "execute": "execute_sql"},
+    )
+    graph.add_conditional_edges(
+        "await_approval",
+        after_approval,
+        {"execute": "execute_sql", "rejected": "synthesize_and_validate"},
+    )
     graph.add_conditional_edges(
         "execute_sql",
         should_retry,
@@ -392,7 +433,16 @@ def build_graph(checkpointer=None):
     )
     graph.add_edge("synthesize_and_validate", END)
 
-    return graph.compile(checkpointer=checkpointer)
+    # **Interrupt sirf checkpointer ke saath.** LangGraph ko pause karke baad me
+    # resume karne ke liye state kahin save karni padti hai — bina checkpointer
+    # ke `interrupt_before` ka koi matlab nahi. Isliye stateless graph purane
+    # hard block pe chalta hai, aur HITL sirf `thread_id` wale path pe milta hai.
+    # Ye Phase 4 ke Phase 3 se pehle aane ka seedha nateeja hai, ittefaq nahi.
+    if checkpointer is not None:
+        return graph.compile(
+            checkpointer=checkpointer, interrupt_before=["await_approval"]
+        )
+    return graph.compile()
 
 
 # Compiled graphs cache. Pehle har request `build_graph()` chalati thi, jo bina
@@ -433,10 +483,60 @@ def run_agent(question: str, thread_id: Optional[str] = None) -> AgentState:
         "retry_count": 0,
         "final_answer": "",
         "logs": [],
+        # Pichhle turn ki approval is turn ki write ko authorize na kar de.
+        "approval_status": "",
     }
 
     if checkpointer is None:
         turn_input["history"] = []
         return app.invoke(turn_input)
 
-    return app.invoke(turn_input, config={"configurable": {"thread_id": thread_id}})
+    config = {"configurable": {"thread_id": thread_id}}
+    result = app.invoke(turn_input, config=config)
+
+    # Agar graph approval gate pe ruka hai to `invoke` us waqt ki state lauta
+    # deta hai, `final_answer` khaali. Ise "poora ho gaya" maan lena sabse
+    # gumraah karne wala outcome hota: caller ko khaali jawab milta aur pata
+    # bhi nahi chalta ki system uske faisle ka intezaar kar raha hai.
+    if _is_awaiting_approval(app, config):
+        return {**result, "approval_status": "pending"}
+    return result
+
+
+def _is_awaiting_approval(app, config) -> bool:
+    """Graph approval node se pehle ruka hua hai ya nahi.
+
+    `state.next` batata hai ki agla kaun sa node chalega. Interrupt ke baad wahan
+    `await_approval` hota hai — matlab graph gate pe khada hai, andar nahi gaya.
+    """
+    try:
+        snapshot = app.get_state(config)
+    except Exception:  # noqa: BLE001 — checkpointer read fail; treat as not paused
+        return False
+    return "await_approval" in (snapshot.next or ())
+
+
+def resume_agent(thread_id: str, approved: bool) -> Optional[AgentState]:
+    """Ruki hui conversation ko insaan ke faisle ke saath aage badhata hai.
+
+    `None` deta hai agar ye thread approval ka intezaar hi nahi kar raha —
+    caller ke liye ye 409 hai, 500 nahi: request galat nahi hai, bas is waqt
+    lagoo nahi hoti (do baar approve dabana, ya purana tab).
+    """
+    checkpointer = get_checkpointer()
+    if checkpointer is None:
+        return None
+
+    app = _get_graph(checkpointer)
+    config = {"configurable": {"thread_id": thread_id}}
+
+    if not _is_awaiting_approval(app, config):
+        return None
+
+    # Faisla state me likho, phir bina naye input ke resume karo. `None` ka matlab
+    # hai "jahan ruke the wahin se chalao" — naya input dene se turn dobara shuru
+    # ho jaata aur ek aur LLM call lag jaati.
+    app.update_state(
+        config, {"approval_status": "approved" if approved else "rejected"}
+    )
+    return app.invoke(None, config=config)
