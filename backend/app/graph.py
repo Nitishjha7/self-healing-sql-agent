@@ -57,6 +57,14 @@ class AgentState(TypedDict):
     final_answer: str
     logs: List[str]
 
+    hitl_enabled: bool
+    """Is turn me approval gate available hai ya nahi.
+
+    Interrupt ke liye checkpointer chahiye, to HITL sirf `thread_id` wale path pe
+    milta hai. Ye flag `generate_sql` tak wo baat pahunchata hai, kyunki gate hone
+    ya na hone se ye badal jaata hai ki model ko write likhne di jaaye ya nahi.
+    """
+
     approval_status: str
     """HITL gate ki haalat: `""` | `"pending"` | `"approved"` | `"rejected"`.
 
@@ -168,9 +176,26 @@ def generate_sql(state: AgentState) -> AgentState:
         else:
             logs.append("Generating initial SQL query.")
 
+    # **Ye constraint gate ke hisaab se badalti hai, aur badalni chahiye.**
+    # "Sirf SELECT likho" isliye tha kyunki koi approval gate nahi tha — model ki
+    # nikali hui koi bhi write seedha database tak jaati. Ab HITL wale path pe
+    # insaan har write ko dekhta hai, to yahan mana karte rehna poore Phase 3 ko
+    # dead code bana deta: gate kabhi trigger hi nahi hota kyunki destructive SQL
+    # kabhi banti hi nahi. Stateless path pe gate hai hi nahi, isliye wahan purani
+    # sakht line hi sahi hai.
+    system_prompt = (
+        "You are an expert PostgreSQL query writer. Write SELECT queries. "
+        "If the user explicitly asks to modify data, write the appropriate "
+        "INSERT/UPDATE/DELETE statement — a human reviews and approves every "
+        "such statement before it runs. Never modify data the user did not ask "
+        "to modify."
+        if state.get("hitl_enabled")
+        else "You are an expert PostgreSQL query writer. Only ever write SELECT queries."
+    )
+
     response = _llm().invoke(
         [
-            SystemMessage(content="You are an expert PostgreSQL query writer. Only ever write SELECT queries."),
+            SystemMessage(content=system_prompt),
             HumanMessage(content=prompt),
         ]
     )
@@ -485,6 +510,9 @@ def run_agent(question: str, thread_id: Optional[str] = None) -> AgentState:
         "logs": [],
         # Pichhle turn ki approval is turn ki write ko authorize na kar de.
         "approval_status": "",
+        # Gate tabhi hai jab checkpointer hai — interrupt ko state save karne ki
+        # jagah chahiye. Isi se tay hota hai ki model write likh sakta hai ya nahi.
+        "hitl_enabled": checkpointer is not None,
     }
 
     if checkpointer is None:
