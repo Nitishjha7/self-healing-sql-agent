@@ -16,6 +16,14 @@
   --err: #b42318;
   --err-soft: #fdecea;
 
+  /* Categorical series slots — from the validated default palette (light steps).
+     Assigned in fixed order, never cycled. */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --sidebar: #ffffff;
+
   color-scheme: light;
 }
 
@@ -37,6 +45,13 @@
     --warn-soft: #35270f;
     --err: #ff9d95;
     --err-soft: #3a1917;
+
+    /* Same eight hues stepped for the dark surface, not an automatic flip. */
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --sidebar: #17171e;
 
     color-scheme: dark;
   }

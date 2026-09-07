@@ -85,6 +85,12 @@ class AgentState(TypedDict):
     final_answer: str
     logs: List[str]
 
+    result_rows: List[dict]
+    """Query ki rows, UI table ke liye (`MAX_RESULT_ROWS` tak)."""
+
+    row_count: int
+    """Kitni rows actually aayi — `result_rows` cap hone pe bhi sahi count."""
+
     guardrail_flags: List[str]
     """Output guard ne is turn me kya pakda (khaali list = kuch nahi).
 
@@ -571,6 +577,8 @@ def run_agent(question: str, thread_id: Optional[str] = None) -> AgentState:
         # Pichhle turn ki approval is turn ki write ko authorize na kar de.
         "approval_status": "",
         "guardrail_flags": [],
+        "result_rows": [],
+        "row_count": 0,
         # Gate tabhi hai jab checkpointer hai — interrupt ko state save karne ki
         # jagah chahiye. Isi se tay hota hai ki model write likh sakta hai ya nahi.
         "hitl_enabled": checkpointer is not None,

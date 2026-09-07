@@ -11,7 +11,8 @@ Most Text-to-SQL demos are a single LLM call: if the generated SQL is wrong, the
 | Agent Workflow | LangGraph (Python) — `StateGraph` with conditional edges |
 | Conversation memory | LangGraph `PostgresSaver` checkpointer, keyed by `thread_id` |
 | LLM Inference | LangChain + Google Gemini (`temperature=0`, model set via `GEMINI_MODEL`) |
-| Write safety | Human-in-the-loop approval gate (`interrupt_before`) + prompt-level output guardrails; Guardrails AI validator still planned |
+| Write safety | Human-in-the-loop approval gate (`interrupt_before`) before any modifying statement |
+| Output validation | Deterministic guard on the final answer — strips schema identifiers and leaked SQL |
 | Observability | LangSmith tracing (opt-in via env vars, off by default) |
 | API Backend | FastAPI + Uvicorn |
 | Data Store | PostgreSQL 16 (SQLAlchemy Core + psycopg2) |
@@ -27,8 +28,8 @@ Most Text-to-SQL demos are a single LLM call: if the generated SQL is wrong, the
    - success → synthesize
    - error and `retry_count < 3` → back to `generate_sql`, this time with the previous SQL **and** the database error in the prompt
    - error and retries exhausted → synthesize a graceful apology instead of leaking the traceback
-5. `synthesize_and_validate` turns rows into a one-or-two-sentence answer, under a system prompt that forbids revealing raw table/column names.
-6. The API returns the answer, the executed SQL, `retry_count`, and step-by-step trace logs for the UI.
+5. `synthesize_and_validate` turns rows into a one-or-two-sentence answer, then a deterministic guard strips anything the prompt asked it not to say — qualified identifiers like `employees.salary`, schema-only column names, or leaked SQL. The prompt is a request; the guard is the guarantee.
+6. The API returns the answer, the executed SQL, the result rows, `retry_count`, any `guardrail_flags`, and step-by-step trace logs for the UI.
 
 If the request carried a `thread_id`, step 2 also receives the earlier turns of that
 conversation, and step 5's answer is appended to them — see [Conversation memory](#conversation-memory).
@@ -47,10 +48,10 @@ Honest snapshot — docs describe what exists, roadmap items are marked as such.
 - ✅ Two-table schema — `departments` + `employees` with a foreign key, so questions require real JOINs
 - ✅ Evaluation harness — 20 questions with gold SQL, execution-accuracy metric, retries-on vs retries-off comparison ([eval/](eval/))
 - ✅ Conversation memory — LangGraph `PostgresSaver` checkpointer, per-`thread_id`, so follow-up questions can refer back ([how it works](#conversation-memory))
-- ✅ Test suite — 28 tests covering memory and approval-gate semantics, no API key or database needed
+- ✅ Test suite — 37 tests covering memory, approval-gate and output-guard semantics; no API key or database needed
 - ✅ Human-in-the-loop approval — destructive statements pause for review instead of being blocked; `ALLOW_WRITES` decides whether an approved statement commits or runs-and-rolls-back ([how it works](docs/TECHNICAL_SPEC.md))
-- ⬜ Guardrails AI validator layer (currently prompt-level safety only)
-- ✅ React + Vite chat UI — answer bubbles, retry badge, collapsible SQL & execution trace, served by Nginx with an `/api/` proxy
+- ✅ Output validation — deterministic guard that strips schema identifiers and leaked SQL from the answer, reported via `guardrail_flags` ([why not Guardrails AI](docs/CODE_NOTES.md))
+- ✅ React + Vite app — sidebar shell, chat with SQL and result table, live agent-trace rail, and a dashboard of database figures plus the measured eval result
 - ✅ Deployment ready — single-service Docker image (FastAPI serves the API + built SPA on one URL), per-IP rate limiting, `render.yaml`, guide in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
 - ⬜ Actually deployed (no live URL yet) — remaining steps are checklisted at the top of [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
 
@@ -59,7 +60,7 @@ Honest snapshot — docs describe what exists, roadmap items are marked as such.
 ```
 Dockerfile  Single-service deploy image (React build + FastAPI)
 backend/    FastAPI app, LangGraph agent, Postgres checkpointer, tests
-frontend/   React + Vite chat UI, Nginx-served with an /api proxy
+frontend/   React + Vite app — chat, agent-trace rail, dashboard
 eval/       Evaluation harness, gold questions, measured results
 docs/       Setup, technical spec, code notes, roadmap, interview notes, deployment
 ```

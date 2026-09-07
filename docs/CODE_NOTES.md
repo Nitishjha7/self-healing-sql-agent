@@ -368,3 +368,65 @@ Aisi thread ko approve karna jo pause hai hi nahi (double-click, purana tab) —
 **Verified (live, Postgres ke saath):** gate destructive query pe rukta hai (`awaiting_approval: true`, khaali `final_answer`), reject karne pe kuch nahi chalta, approve karne pe statement chalta hai aur rollback hota hai (2 rows report, data intact), dobara approve karne pe 409.
 
 **⚠️ Verified nahi:** `ALLOW_WRITES=true` wala commit path asli database pe nahi chalaya — wo sach me rows delete karta aur demo data chala jaata. Us branch ko unit test cover karta hai (fake `run_write` ke saath, dono directions), par end-to-end nahi. **Interview me ye khud bolna.**
+
+---
+
+## backend/app/validators.py — output guard
+
+**Kya karta hai:** final answer se schema identifiers aur leak hui SQL nikaal deta hai, aur jo mila uski list `guardrail_flags` me deta hai.
+
+### Guardrails AI kyun nahi (do baar koshish ki)
+
+| Version | Maangta hai | Nateeja |
+|---|---|---|
+| `<= 0.5` | `langchain-core<0.3` | Conflict — humein `>=0.3` chahiye |
+| `>= 0.6` | `langchain-core>=1.0` | Conflict — langgraph 0.2 `<0.4` maangta hai |
+
+Beech me koi version hai hi nahi. Use karne ke liye poora **langchain 1.x migration** karna padta — jo checkpointer aur graph APIs tod deta — sirf ek validator ke liye.
+
+**Aur yahan deterministic check waise bhi behtar hai.** Schema leakage ek *syntactic* baat hai: jawab me `employees.salary` likha hai ya nahi. Ye regex ka kaam hai, judgement ka nahi. Iske liye ek aur LLM lagana matlab ek deterministic check ko probabilistic bana dena — **aur us naye LLM ko kaun check karega.**
+
+### Sabse important line: kya flag NAHI karte
+
+`salary`, `name`, `role`, `budget`, `location` — ye schema me bhi hain aur aam angrezi me bhi. Inhe flag karna **har sahi jawab tod deta.** Isliye flag sirf wo hote hain jo prose me kabhi nahi aate:
+- Qualified identifiers: `employees.salary`, `e.name`, `d.budget`
+- `department_id` (schema-only naam)
+- `SELECT ... FROM` (SQL fragment)
+
+Generic `\w+\.\w+` pattern jaan-boojh ke nahi liya — wo "e.g." aur har sentence boundary pe lag jaata. Pattern schema ke **asli naamon** se banaya gaya hai, isliye false positives lagbhag khatam ho jaate hain.
+
+### Redact karte hain, block nahi
+
+Schema naam leak hona low severity hai — ek sahi jawab ko uske liye maar dena user ke liye leak se zyada bura hai. **Lekin chup-chaap theek kar dena bhi galat hai:** flags API response me jaate hain aur trace me line aati hai, taaki "guard ne kaam kiya" aur "guard ki kabhi zaroorat hi nahi padi" alag dikhein.
+
+Ek apwaad: poori SQL answer me aa jaana. Wahan tukde kaat kar bacha hua text dikhana user ko ek adhoora, bharosemand-dikhne wala jawab de deta — isliye poora answer badal jaata hai.
+
+### Jo enforce nahi hota, aur kyun
+
+Synthesis prompt ye bhi kehta hai ki ek se zyada logon ki salary figures na do. **Wo rule deterministic nahi ho sakta:** "Engineering ka average 101750, Sales ka 73000" me do figures hain par wo aggregate hain, kisi vyakti ki salary nahi. Dono ko alag karne ke liye semantics chahiye. Us rule ko enforce karne ka **dikhava** karne se behtar hai maan lena ki wo abhi prompt-level hi hai.
+
+---
+
+## Frontend — app shell, trace rail, dashboard
+
+**Files:** `App.jsx` (shell + chat), `TracePanel.jsx`, `Dashboard.jsx`, `Charts.jsx`, `Shell.css`.
+
+**Trace rail sabse zaroori hissa hai.** Poore project ka daawa ye hai ki agent database error padhkar apni query khud sudhaarta hai — aur ek chat bubble jisme sirf final answer dikhe, **theek wahi view hai jisme ye daawa invisible ho jaata hai.** Retry screen pe tabhi exist karta hai jab failure bhi dikhe. Isliye trace ek alag panel hai, ek collapsed accordion nahi.
+
+**Charts hand-rolled SVG/CSS hain, koi library nahi.** Do forms, char categories — ye kuch dozen lines hain. Recharts lane ka matlab hota ek single-page bundle me ~500KB, aur exactly un cheezon ka control chhodna jo yahan matter karti hain: mark geometry, label placement, theme tokens.
+
+**Colours validated categorical palette se hain** (`--series-1..4` in `index.css`), fixed order me assign hote hain, cycle nahi hote. Light aur dark ke steps **alag chune gaye hain**, automatic flip nahi. Dono modes validator se pass hue: worst adjacent CVD ΔE 9.1 light / 8.4 dark. Light mode me contrast 3:1 se neeche aata hai — iska relief ye hai ki **har bar apni value label ke saath aata hai**, isliye identity kabhi color-alone pe nahi tikti.
+
+**Dashboard ke numbers do alag kism ke hain, aur UI me alag dikhte hain:**
+- **Database figures** — `/api/stats` se live
+- **Eval results** — static constant, aur UI me label bhi lagta hai (`20 questions · gemini-3.5-flash-lite`). Ye 20-question harness minutes leta hai aur din ka zyadatar free quota kha jaata hai; page load pe recompute karna possible hi nahi. Purane numbers ko live jaisa dikhana unhe honestly "recorded result" batane se bura hota.
+
+**Dashboard query hard-coded hai, agent se generate nahi hoti.** Dashboard ek fixed report hai, ek sawaal nahi. Agent se banwane ka matlab hota har page load pe ek LLM call, non-deterministic numbers, aur ek panel jo quota khatam hone pe khaali ho jaata.
+
+**Eval chart ke saath honest reading bhi hai** — chart ke bilkul neeche, kisi doc me dabi hui nahi. Bina uske headline number system ko zyada achha dikhata hai: pehli do conditions me loop kabhi fire hi nahi hua.
+
+### `result_rows` — API me rows
+
+`execute_sql` ab rows structured shakl me bhi state me daalta hai (`MAX_RESULT_ROWS = 50` tak), taaki UI table dikha sake. Cap isliye hai ki ye rows **checkpointer me likhi jaati hain** — bina cap ke ek "SELECT * FROM employees" poori table ko har conversation checkpoint me daal deta.
+
+`_serializable()` Postgres ke `Decimal`/`date` ko JSON-safe banata hai. Ye sirf API ke liye nahi: checkpointer bhi inhe serialize karta hai, to ek naya column type API aur memory dono ko ek saath todta.

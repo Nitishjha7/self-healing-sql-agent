@@ -1,0 +1,715 @@
+/* App shell: sidebar + main column + trace rail, plus the dashboard.
+   Chat bubble and approval styles stay in App.css. */
+
+.shell {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+/* ---------- sidebar ---------- */
+
+.sidebar {
+  background: var(--sidebar);
+  border-right: 1px solid var(--border);
+  padding: 18px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand-mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-size: 17px;
+  flex-shrink: 0;
+}
+
+.brand strong {
+  display: block;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+}
+
+.brand small {
+  display: block;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.new-query {
+  width: 100%;
+  padding: 10px;
+  border-radius: 9px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+.new-query:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nav-item {
+  text-align: left;
+  padding: 9px 11px;
+  border-radius: 8px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+.nav-item:hover {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.nav-item.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.side-section {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+
+.side-title {
+  margin: 0 0 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.side-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Questions are free text and can be long. The sidebar is an index, not a place
+   to read them — the transcript is. */
+.side-list li {
+  font-size: 12.5px;
+  color: var(--muted);
+  padding: 6px 8px;
+  border-radius: 7px;
+  background: var(--code-bg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.side-card {
+  margin-top: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  background: var(--code-bg);
+}
+
+.side-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.side-card strong {
+  font-size: 13px;
+}
+
+.side-card p {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* ---------- main column ---------- */
+
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.topbar {
+  padding: 22px 26px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 20px;
+  letter-spacing: -0.01em;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+}
+
+.pill.small {
+  font-size: 10.5px;
+  padding: 2px 7px;
+}
+
+.pill.ok {
+  color: var(--ok);
+  border-color: var(--ok);
+  background: var(--ok-soft);
+}
+
+.pill.warn {
+  color: var(--warn);
+  border-color: var(--warn);
+  background: var(--warn-soft);
+}
+
+.pill .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* ---------- workspace: chat + trace ---------- */
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 330px;
+  flex: 1;
+  min-height: 0;
+}
+
+.chat-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 0 26px;
+}
+
+.chat-col .chat {
+  padding: 22px 0;
+}
+
+/* ---------- cards (SQL, results) ---------- */
+
+.card {
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 13px;
+  border-bottom: 1px solid var(--border);
+}
+
+.card-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.card .sql {
+  border: none;
+  border-radius: 0;
+  background: var(--code-bg);
+}
+
+.inline-toggle {
+  align-self: flex-start;
+  margin-left: 0;
+}
+
+.logs.boxed {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 12px 12px 30px;
+  background: var(--panel);
+}
+
+/* ---------- result table ---------- */
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.result {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.result th,
+.result td {
+  text-align: left;
+  padding: 8px 13px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.result th {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.result tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* ---------- trace rail ---------- */
+
+.trace {
+  border-left: 1px solid var(--border);
+  background: var(--panel);
+  padding: 18px;
+  position: sticky;
+  top: 0;
+  align-self: start;
+  max-height: 100vh;
+  overflow-y: auto;
+}
+
+.trace-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.trace-head h2 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.trace-empty {
+  line-height: 1.6;
+}
+
+.steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.step {
+  display: flex;
+  gap: 10px;
+  padding: 7px 0;
+  position: relative;
+}
+
+/* Connector between steps: the trace is one run, and a plain gap between rows
+   reads as a list of unrelated items instead. */
+.step:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 10px;
+  top: 28px;
+  bottom: -2px;
+  width: 1px;
+  background: var(--border);
+}
+
+.step-icon {
+  width: 21px;
+  height: 21px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  flex-shrink: 0;
+  background: var(--code-bg);
+  color: var(--muted);
+  z-index: 1;
+}
+
+.step-icon.ok {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.step-icon.warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.step-icon.err {
+  background: var(--err-soft);
+  color: var(--err);
+}
+
+.step-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.step-head {
+  display: block;
+  font-size: 12.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.step-detail {
+  margin: 5px 0 0;
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: var(--code-bg);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+
+.step-detail.err {
+  background: var(--err-soft);
+  color: var(--err);
+}
+
+.step.running .step-head {
+  color: var(--muted);
+}
+
+.spin {
+  animation: spin 1.1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
+}
+
+.trace-summary {
+  margin: 16px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.trace-summary > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12.5px;
+}
+
+.trace-summary dt {
+  color: var(--muted);
+}
+
+.trace-summary dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+.trace-summary dd.flagged {
+  color: var(--warn);
+}
+
+/* ---------- dashboard ---------- */
+
+.dash {
+  padding: 24px 26px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 34px;
+}
+
+.dash-title {
+  margin: 0 0 4px;
+  font-size: 17px;
+}
+
+.dash-sub {
+  margin: 0 0 16px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.muted-note {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.tile {
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--panel);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tile-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+/* Tabular figures so a row of tiles does not jitter as values change. */
+.tile-value {
+  font-size: 26px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.panels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px;
+}
+
+.panel {
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--panel);
+  padding: 16px;
+}
+
+.panel-title {
+  margin: 0 0 14px;
+  font-size: 13.5px;
+}
+
+.callout {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border-radius: 11px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  background: var(--panel);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.callout strong {
+  color: var(--text);
+}
+
+/* ---------- charts ---------- */
+
+.bars {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+
+.bar-row {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr) 62px;
+  align-items: center;
+  gap: 11px;
+}
+
+.bar-label {
+  font-size: 12.5px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bar-track {
+  height: 11px;
+  border-radius: 4px;
+  background: var(--code-bg);
+  overflow: hidden;
+}
+
+.bar-track.stacked {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  height: auto;
+  background: none;
+  overflow: visible;
+}
+
+/* Rounded only at the data end, anchored to the baseline. */
+.bar-fill {
+  display: block;
+  height: 11px;
+  border-radius: 0 4px 4px 0;
+  min-width: 3px;
+}
+
+.bar-fill.thin {
+  height: 5px;
+  opacity: 0.85;
+}
+
+/* Every bar carries its value: the light-mode palette sits below 3:1 against
+   the surface, and visible labels are the relief that requires. */
+.bar-value {
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.bar-value.gain {
+  color: var(--ok);
+}
+
+.eval-row .eval-pair {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.legend {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 13px;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.legend-item i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+.chart-caption {
+  margin: 12px 0 0;
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* ---------- responsive ---------- */
+
+/* Below this width the rail would become a second scroll column and push the
+   composer off screen. The inline "Show execution trace" toggle covers it. */
+@media (max-width: 1100px) {
+  .workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .trace {
+    display: none;
+  }
+}
+
+@media (max-width: 780px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sidebar {
+    position: static;
+    height: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .side-section,
+  .side-card {
+    display: none;
+  }
+
+  .new-query,
+  .nav {
+    width: auto;
+  }
+
+  .nav {
+    flex-direction: row;
+  }
+}

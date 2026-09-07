@@ -72,6 +72,11 @@ class QueryResponse(BaseModel):
     khaali `final_answer` apne aap me "kuch nahi mila" jaisa dikhta, jabki asal
     me system user ka jawab maang raha hai.
     """
+    result_rows: list[dict] = []
+    """Query ki rows table ke liye (50 tak)."""
+
+    row_count: int = 0
+
     guardrail_flags: list[str] = []
     """Output guard ne kya pakda. Khaali = kuch nahi mila."""
 
@@ -111,6 +116,8 @@ def _to_response(result: dict, thread_id: str | None) -> QueryResponse:
         thread_id=thread_id,
         awaiting_approval=result.get("approval_status") == "pending",
         guardrail_flags=result.get("guardrail_flags") or [],
+        result_rows=result.get("result_rows") or [],
+        row_count=result.get("row_count") or 0,
         memory_active=bool(thread_id and get_checkpointer() is not None),
     )
 
