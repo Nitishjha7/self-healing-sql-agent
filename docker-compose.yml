@@ -30,6 +30,9 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD:-agent}@db:5432/${POSTGRES_DB:-employees}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.5-flash-lite}
+      # Approved write ko commit karna hai ya chala ke rollback kar dena.
+      # Default false: approval flow poora dikhta hai, par demo data safe rehta hai.
+      ALLOW_WRITES: ${ALLOW_WRITES:-false}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-*}
       RATE_LIMIT_REQUESTS: ${RATE_LIMIT_REQUESTS:-5}
       RATE_LIMIT_WINDOW: ${RATE_LIMIT_WINDOW:-60}

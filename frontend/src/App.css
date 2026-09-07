@@ -139,6 +139,72 @@
   background: var(--accent-soft);
 }
 
+/* ---------- approval gate ---------- */
+
+/* Amber, not red: this is a decision point, not a failure. Red would read as
+   "something broke" when the system is working exactly as designed. */
+.bubble.agent.approval {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+}
+
+.approval-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.badge.stop {
+  background: var(--warn);
+  color: var(--bg);
+}
+
+.approval-note {
+  font-size: 12.5px;
+  color: var(--muted);
+  margin: 0;
+}
+
+.approval-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.btn {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+/* The destructive action is the one that carries the weight, so it is the one
+   that looks consequential — the safe choice stays visually quiet. */
+.btn.danger {
+  background: var(--err);
+  border-color: var(--err);
+  color: #fff;
+}
+
+.btn.danger:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* ---------- details ---------- */
 
 .details {

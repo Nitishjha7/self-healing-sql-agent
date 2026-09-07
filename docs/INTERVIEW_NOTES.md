@@ -285,7 +285,28 @@ A: Genuine syntax/schema errors pehle ya doosre retry me theek ho jaate hain jab
 A: `give_up` path synthesize node pe jaata hai jo ek clean apology deta hai — raw traceback user ko kabhi nahi jaata. Error `logs` array me rehta hai debugging ke liye. Failure ek designed path hai, crash nahi.
 
 **Q: LLM ko DROP TABLE likhne se kaise rokte ho?**
-A: Teen layers, aur main honest rahunga ki teeno abhi implemented nahi. Layer 1 — system prompt: "only ever write SELECT". Layer 2 — code guard: `execute_sql` database call se pehle destructive keywords reject karta hai. Layer 3, jo abhi nahi hai aur asli answer hai — database-level read-only role. Prompt bypass ho sakta hai, keyword match naive hai, lekin ek Postgres role jise `DELETE` grant hi nahi hai wo prompt injection se bypass nahi ho sakta.
+A: Ab wo block nahi hota — **rukta hai.** Destructive statement ek approval gate pe jaata hai: graph pause hota hai, exact SQL user ko dikhta hai, aur wo approve ya reject karta hai. Reject pe kuch chalta hi nahi. Approve pe statement chalta hai, aur `ALLOW_WRITES` tay karta hai ki commit ho ya rollback. Uske peeche bhi layers hain — system prompt, keyword guard, aur asli production answer database-level read-only role, jo prompt injection se bypass nahi ho sakta.
+
+**Q: HITL implement karne me sabse interesting cheez kya thi?** ← *ye do jawab tumhe alag dikhate hain*
+
+A: **Do cheezein jo pehle se socha nahi tha.**
+
+**Ek — HITL checkpointer ke bina possible hi nahi hai.** Pause karke baad me resume karna do alag HTTP requests me hota hai, to graph ki state kahin beech me zinda rehni chahiye. Bina checkpointer ke resume karne ko kuch hai hi nahi. Isliye stateless path (bina `thread_id`) purane hard block pe hi rehta hai — aur ye gap nahi, **sahi behaviour hai**: aisa approval prompt dikhana jise honour hi nahi kiya ja sakta, seedha refuse karne se bura hai. Phase 4 ka Phase 3 se pehle aana ittefaq nahi tha, wo precondition tha.
+
+**Do — poora phase dead code ban gaya tha, aur pehle test me hi pakda gaya.** Mera system prompt kehta tha "only ever write SELECT queries". Gate banane ke baad maine test kiya — "Delete all employees from HR" — aur model ne `SELECT` likh diya. Gate skip ho gaya. Wo constraint **isliye** thi kyunki gate nahi tha; gate banane ke baad usi ka rehna matlab destructive SQL kabhi banti hi nahi, gate kabhi fire hi nahi hota, aur feature aisa "kaam karta" dikhta jaise sab theek hai — jabki wahan tak kuch pahunchta hi nahi. Ab wo prompt line `hitl_enabled` pe conditional hai.
+
+> **Ye line bolna:** *"Ek feature jo isliye pass ho raha hai kyunki uska code kabhi chalta hi nahi — wo test hua hi nahi. Isliye main har naye guard ke liye pehle ye poochta hoon ki uske trigger hone ka raasta actually exist karta hai ya nahi."*
+
+**Q: Approved DELETE sach me chalti hai? Public demo pe wo khatarnak nahi?**
+A: `ALLOW_WRITES` isi ke liye hai. Default `false` pe approved statement **phir bhi chalta hai** — Postgres use plan karta hai, saare constraints enforce karta hai, batata hai kitni rows par asar padta — aur uske baad rollback ho jaata hai. Isse gate public URL pe demo ho sakta hai bina kisi visitor ko table khaali karne ki taakat diye.
+
+Aur ye "approval ka dikhava" nahi hai: response me saaf likha hota hai ki rollback hua aur kitni rows affect hoti. **Safe mode me chalana aur jhoot bolna do alag cheezein hain.**
+
+**Q: Aur agar `ALLOW_WRITES=true` ho jaye?**
+A: Tab synthesis prompt bhi badalna padta hai — aur yahi wo jagah hai jahan mujhe apna hi purana bug dobara mila. Pehle prompt me hardcoded tha "this system is STRICTLY READ-ONLY". `ALLOW_WRITES=true` ke saath wo **ulti** direction me jhoot bulwata: ek write jo sach me commit ho gaya, use "kuch nahi badla" batata. Ab prompt flag pe conditional hai. Sabak wahi hai jo false-confirmation bug me tha, bas mirror image — **na jhoothi confirmation, na jhoothi tasalli.**
+
+**Q: Approve endpoint pe koi auth hai?**
+A: Nahi, aur ye main khud bolunga. `thread_id` client generate karta hai aur unauthenticated hai — jiske paas thread id hai wo us thread pe write approve kar sakta hai. Single-user demo ke liye theek, real use ke liye nahi: wahan approve endpoint pe auth chahiye, aur thread key pe per-user namespace. Ye wahi limitation hai jo conversation memory me hai, bas yahan uska anjaam data change hona hai, sirf padhna nahi — isliye zyada gambhir.
 
 **Q: Koi bug mila jo testing me pakda?** ← *ye tumhara best story hai, iske liye taiyar raho*
 A: Haan, ek jo mujhe bahut kuch sikha gaya. Maine UI se poocha "Delete all employees from HR". Har data-touching layer sahi chala — system prompt ne generation ko SELECT tak rakha, toh keyword guard ko fire karne ki zaroorat hi nahi padi, aur database me kuch nahi badla. Phir synthesizer ne question padha, do rows aate dekhe, aur jawab diya: **"The employees Anjali Nair and Vikram Singh have been removed from the HR department."**

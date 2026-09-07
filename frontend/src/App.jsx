@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import "./App.css";
 
-// Empty by default: the Docker/nginx setup proxies /api on the same origin.
-// A split deployment (frontend on Pages, backend on Cloud Run) sets
-// VITE_API_BASE to the backend's URL at build time.
+// Empty by default: both the docker-compose/nginx setup and the single-service
+// deploy image serve this app on the same origin as the API. Only a split
+// deployment needs VITE_API_BASE, set to the backend's URL at build time.
 const API_BASE = import.meta.env.VITE_API_BASE || "";
 
 const EXAMPLES = [
@@ -99,6 +99,61 @@ export default function App() {
     }
   }
 
+  async function decide(approved) {
+    if (loading) return;
+    setLoading(true);
+
+    try {
+      const res = await fetch(`${API_BASE}/api/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ thread_id: threadId, approved }),
+      });
+
+      if (res.status === 409) {
+        // Already decided — a double click, or a stale tab. Not an error worth
+        // alarming the user about, but the pending card has to go: leaving it up
+        // implies a decision is still outstanding when it is not.
+        setTurns((prev) => {
+          const next = [...prev];
+          const last = next[next.length - 1];
+          next[next.length - 1] = {
+            ...last,
+            awaiting_approval: false,
+            final_answer:
+              last.final_answer ||
+              "This request was already decided elsewhere. Nothing further ran.",
+          };
+          return next;
+        });
+        return;
+      }
+      if (res.status === 429) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail || "Too many requests — give it a minute.");
+      }
+      if (!res.ok) throw new Error(`Backend returned ${res.status}`);
+
+      const data = await res.json();
+      setTurns((prev) => {
+        const next = [...prev];
+        next[next.length - 1] = { ...next[next.length - 1], ...data };
+        return next;
+      });
+    } catch (err) {
+      setTurns((prev) => {
+        const next = [...prev];
+        next[next.length - 1] = {
+          ...next[next.length - 1],
+          failed: String(err.message || err),
+        };
+        return next;
+      });
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <div className="app">
       <header className="header">
@@ -143,14 +198,20 @@ export default function App() {
               ))}
             </div>
             <p className="empty-hint">
-              The last one is blocked on purpose — the agent only ever runs
-              read-only queries.
+              The last one is there on purpose: anything that would modify data
+              stops and asks you to approve the exact statement first.
             </p>
           </div>
         )}
 
         {turns.map((turn, i) => (
-          <Turn key={i} turn={turn} pending={loading && i === turns.length - 1} />
+          <Turn
+            key={i}
+            turn={turn}
+            pending={loading && i === turns.length - 1}
+            onDecide={i === turns.length - 1 ? decide : null}
+            busy={loading}
+          />
         ))}
 
         {/* Only offered once an answer exists to refer back to, and only when
@@ -191,7 +252,7 @@ export default function App() {
   );
 }
 
-function Turn({ turn, pending }) {
+function Turn({ turn, pending, onDecide, busy }) {
   const [open, setOpen] = useState(false);
   const retries = turn.retry_count ?? 0;
 
@@ -213,6 +274,45 @@ function Turn({ turn, pending }) {
       {turn.failed && (
         <div className="bubble agent error">
           Couldn&apos;t reach the agent: {turn.failed}
+        </div>
+      )}
+
+      {/* The approval gate. The SQL is shown in full and unedited — asking
+          someone to approve a statement they cannot read is not an approval,
+          it is a rubber stamp with extra steps. */}
+      {turn.awaiting_approval && !pending && (
+        <div className="bubble agent approval">
+          <div className="approval-head">
+            <span className="badge stop">Approval required</span>
+            <span className="approval-note">
+              This would modify data, so the agent paused before running it.
+            </span>
+          </div>
+
+          <pre className="sql">{turn.sql_query}</pre>
+
+          {onDecide ? (
+            <div className="approval-actions">
+              <button
+                className="btn danger"
+                disabled={busy}
+                onClick={() => onDecide(true)}
+              >
+                Approve &amp; run
+              </button>
+              <button
+                className="btn"
+                disabled={busy}
+                onClick={() => onDecide(false)}
+              >
+                Reject
+              </button>
+            </div>
+          ) : (
+            <p className="approval-note">
+              Superseded by a later question — this one was never run.
+            </p>
+          )}
         </div>
       )}
 

@@ -46,7 +46,7 @@ Live introspection se sirf columns milte, ye guidance nahi — aur is tareeke se
 
 **Design choice:** Table/columns raw SQL se banaye (SQLAlchemy Core `text()`), ORM models (declarative classes) nahi banaye — kyunki agent khud dynamic SQL likhta hai, humein fixed ORM models ki zaroorat nahi, sirf raw execution chahiye.
 
-**Security note (abhi ke liye basic):** `run_sql` filhal kisi bhi SQL ko run kar sakta hai (SELECT ho ya DELETE/UPDATE). Guard `execute_sql` node me lag chuka hai (destructive keywords DB call se pehle block hote hain). **Sahi production answer phir bhi database-level read-only role hai** — wo prompt injection se bypass nahi ho sakta, jabki keyword matching kar sakti hai.
+**Security note:** `run_sql` technically kisi bhi SQL ko chala sakta hai, isliye guard `execute_sql` node me hai — destructive keywords DB call se **pehle** pakde jaate hain. Writes ab `run_write` se jaate hain, jo alag function hai aur commit karna hai ya rollback ye caller batata hai. **Sahi production answer phir bhi database-level read-only role hai** — wo prompt injection se bypass nahi ho sakta, jabki keyword matching kar sakti hai.
 
 ---
 
@@ -67,7 +67,7 @@ Ye file **project ka core hai** — poora self-healing LangGraph state machine y
 - Agar error hai (matlab pichhli baar query fail hui) → **self-healing ka core part**: previous SQL + error message dono LLM ko wapas bhejta hai, taaki LLM samajh sake exactly kya galat hua aur fix kare. Ye normal "retry with same prompt" se better hai kyunki LLM ko concrete feedback milta hai.
 
 **`execute_sql` node:**
-- Pehle ek **safety check**: agar generated SQL me `DROP`, `DELETE`, `UPDATE`, `INSERT`, `ALTER`, `TRUNCATE` jaisa koi keyword hai, query turant block ho jaati hai (retry count ko max pe set karke loop se nikal deta hai). Ye basic guardrail hai jo destructive queries ko rokta hai — Phase 3 (HITL) me isko "approve karo" wale flow me upgrade karenge.
+- Pehle ek **safety check** (`is_destructive`): agar generated SQL me `DROP`, `DELETE`, `UPDATE`, `INSERT`, `ALTER`, `TRUNCATE` jaisa koi keyword hai — **stateless path pe** query turant block ho jaati hai (retry count max pe set karke loop se nikal jaati hai, kyunki policy rejection retry se theek nahi hoti). **`thread_id` wale path pe ab ye block nahi, approval gate hai** — neeche "HITL approval gate" section dekho.
 - Warna `run_sql()` (db.py se) call karta hai. Success pe result state me save hota hai; exception aane pe error state me save hoke `retry_count` badhta hai.
 
 **`should_retry` — conditional edge function:**
@@ -324,3 +324,47 @@ sawaal LLM ke bahar hai. Gemini free tier 20 requests/day deta hai; us quota ko 
 tests pe kharch karna jo usse kuch seekh hi nahi rahe, seedha nuksan hai.
 
 `Dockerfile.test` isliye ki is machine pe local Python nahi hai.
+
+---
+
+## HITL approval gate (Phase 3)
+
+**Files:** `graph.py` (`needs_approval`, `await_approval`, `after_approval`, `is_destructive`, `execute_sql`), `db.py` (`run_write`), `main.py` (`/api/approve`), `frontend/src/App.jsx` (approval card).
+
+**Kya karta hai:** destructive query ab hard block nahi hoti — graph rukta hai, exact statement user ko dikhata hai, aur faisle ka intezaar karta hai.
+
+### Teen cheezein jo build karte waqt pata chali
+
+**1. Dedicated approval node banana pada.** Is LangGraph version me dynamic `interrupt()` hai hi nahi — sirf static `interrupt_before=[...]`, jo named node se pehle **har baar** rukta hai. `execute_sql` pe lagate to har `SELECT` bhi ruk jaata. Alag `await_approval` node banane se pause **conditional** ho gaya: routing tay karti hai ki is turn me gate se guzarna hai ya nahi.
+
+**2. HITL checkpointer ke bina possible hi nahi.** Do HTTP requests ke beech graph state kahin save honi chahiye — bina uske resume karne ko kuch hai hi nahi. Isliye stateless path (bina `thread_id`) purane hard block pe hi rehta hai. **Ye gap nahi, sahi behaviour hai:** aisa approval prompt dikhana jise honour hi nahi kiya ja sakta, seedha refuse karne se bura hai. Phase 4 ka Phase 3 se pehle aana ittefaq nahi tha.
+
+**3. Generation prompt badalna zaroori tha, warna poora phase dead code hota.** System prompt me likha tha "only ever write SELECT queries" — ye constraint isliye thi **kyunki gate nahi tha**. Gate banane ke baad bhi wo line chhod dete to destructive SQL kabhi banti hi nahi, gate kabhi fire hi nahi hota, aur phase aisa "kaam karta" dikhta jaise sab theek hai — jabki wahan tak kuch pahunchta hi nahi.
+
+> Ye pehli baar testing me hi pakda gaya: "Delete all employees from HR" poocha aur model ne `SELECT` likh diya, gate skip ho gaya. Ab prompt `hitl_enabled` pe conditional hai.
+
+### `ALLOW_WRITES` — approve hona aur commit hona alag hai
+
+`false` (default) pe approved statement **phir bhi chalta hai** — Postgres plan karta hai, constraints enforce karta hai, affected rows batata hai — aur rollback ho jaata hai. Isse public demo pe approval flow dikhaya ja sakta hai bina kisi visitor ko table khaali karne ki taakat diye.
+
+**Ye approval ka dikhava nahi hai:** response me saaf likha jaata hai ki rollback hua aur kitni rows par asar padta. Safe mode me chalana aur jhoot bolna do alag cheezein hain.
+
+`run_write` ko `run_sql` se alag rakha: `run_sql` contract se read-only hai aur uska caller result set expect karta hai; write ke paas rows hoti hi nahi (`result.keys()` wahan error deta hai). Dono ko mila dena wahi tareeka hai jisse ek "read-only" helper chupke se data badalne lagta hai.
+
+### Synthesis prompt dono taraf guard karta hai
+
+Pehle hardcoded tha "this system is STRICTLY READ-ONLY". `ALLOW_WRITES=true` ke baad wo **ulti** direction me jhoot bulwata: ek write jo sach me commit ho gaya, use "kuch nahi badla" batata. Ab prompt flag pe conditional hai.
+
+Yahi wahi sabak hai jo pehle false-confirmation bug me mila tha ("removed from the HR department" wala jhooth), bas iski mirror image — **na jhoothi confirmation, na jhoothi tasalli.**
+
+Rejection ka jawab LLM se generate hi nahi hota — wo ek fixed policy outcome hai. Model se likhwane ka matlab hota use narrate karte hue kuch aur bolne ka mauka dena.
+
+### 409 kyun, 200 ya 400 nahi
+
+Aisi thread ko approve karna jo pause hai hi nahi (double-click, purana tab) — na caller ki galti hai na server ki kharabi. Chup-chaap 200 lauta dena sabse bura hota: user ko lagta uska faisla laga diya gaya, jabki kuch hua hi nahi.
+
+### Kya verify hua, kya nahi
+
+**Verified (live, Postgres ke saath):** gate destructive query pe rukta hai (`awaiting_approval: true`, khaali `final_answer`), reject karne pe kuch nahi chalta, approve karne pe statement chalta hai aur rollback hota hai (2 rows report, data intact), dobara approve karne pe 409.
+
+**⚠️ Verified nahi:** `ALLOW_WRITES=true` wala commit path asli database pe nahi chalaya — wo sach me rows delete karta aur demo data chala jaata. Us branch ko unit test cover karta hai (fake `run_write` ke saath, dono directions), par end-to-end nahi. **Interview me ye khud bolna.**

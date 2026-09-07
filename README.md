@@ -11,7 +11,7 @@ Most Text-to-SQL demos are a single LLM call: if the generated SQL is wrong, the
 | Agent Workflow | LangGraph (Python) — `StateGraph` with conditional edges |
 | Conversation memory | LangGraph `PostgresSaver` checkpointer, keyed by `thread_id` |
 | LLM Inference | LangChain + Google Gemini (`temperature=0`, model set via `GEMINI_MODEL`) |
-| Output Safety | Prompt-level guardrails today; Guardrails AI planned (see Status) |
+| Write safety | Human-in-the-loop approval gate (`interrupt_before`) + prompt-level output guardrails; Guardrails AI validator still planned |
 | Observability | LangSmith tracing (opt-in via env vars, off by default) |
 | API Backend | FastAPI + Uvicorn |
 | Data Store | PostgreSQL 16 (SQLAlchemy Core + psycopg2) |
@@ -22,7 +22,7 @@ Most Text-to-SQL demos are a single LLM call: if the generated SQL is wrong, the
 
 1. User asks a question in natural language (e.g. "Who earns more than 80000 in Engineering?").
 2. `generate_sql` builds a `SELECT` query from a plain-text schema description injected into the prompt.
-3. `execute_sql` first blocks any destructive keyword (`DROP`/`DELETE`/`UPDATE`/`INSERT`/`ALTER`/`TRUNCATE`), then runs the query against PostgreSQL.
+3. Anything that would modify data (`DROP`/`DELETE`/`UPDATE`/`INSERT`/`ALTER`/`TRUNCATE`) stops at an approval gate — see [Human-in-the-loop approval](#human-in-the-loop-approval). Everything else runs straight against PostgreSQL.
 4. A **conditional edge** routes on the result:
    - success → synthesize
    - error and `retry_count < 3` → back to `generate_sql`, this time with the previous SQL **and** the database error in the prompt
@@ -41,13 +41,14 @@ Honest snapshot — docs describe what exists, roadmap items are marked as such.
 
 - ✅ `backend/app/db.py` — Postgres engine, `departments` + `employees` tables (FK), seed data, `run_sql`
 - ✅ `backend/app/graph.py` — full LangGraph self-healing state machine
-- ✅ `backend/app/main.py` — `GET /health`, `POST /query`
+- ✅ `backend/app/main.py` — `GET /health`, `POST /api/query`, `POST /api/approve`
 - ✅ Docker Compose (`db` + `backend` + `frontend`)
 - ✅ LangSmith tracing wired (opt-in; set `LANGCHAIN_TRACING_V2=true` + an API key)
 - ✅ Two-table schema — `departments` + `employees` with a foreign key, so questions require real JOINs
 - ✅ Evaluation harness — 20 questions with gold SQL, execution-accuracy metric, retries-on vs retries-off comparison ([eval/](eval/))
 - ✅ Conversation memory — LangGraph `PostgresSaver` checkpointer, per-`thread_id`, so follow-up questions can refer back ([how it works](#conversation-memory))
-- ✅ Test suite — 10 tests covering the memory semantics, no API key or database needed
+- ✅ Test suite — 28 tests covering memory and approval-gate semantics, no API key or database needed
+- ✅ Human-in-the-loop approval — destructive statements pause for review instead of being blocked; `ALLOW_WRITES` decides whether an approved statement commits or runs-and-rolls-back ([how it works](docs/TECHNICAL_SPEC.md))
 - ⬜ Guardrails AI validator layer (currently prompt-level safety only)
 - ✅ React + Vite chat UI — answer bubbles, retry badge, collapsible SQL & execution trace, served by Nginx with an `/api/` proxy
 - ✅ Deployment ready — single-service Docker image (FastAPI serves the API + built SPA on one URL), per-IP rate limiting, `render.yaml`, guide in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
@@ -73,6 +74,44 @@ docker compose up --build
 This brings up three containers: `db` (PostgreSQL 16), `backend` (FastAPI + agent on :8000), and `frontend` (React via Nginx on :80). Open `http://localhost` for the chat UI; Swagger docs are at `http://localhost:8000/docs`.
 
 If those ports are taken, set `BACKEND_PORT` / `FRONTEND_PORT` in `.env` — the compose file reads both.
+
+## Human-in-the-loop approval
+
+Ask for something that would change data and the agent does not refuse — it stops
+and shows you the exact statement:
+
+```bash
+curl -X POST localhost:8000/api/query -H 'Content-Type: application/json' \
+  -d '{"question":"Delete all employees from HR","thread_id":"demo-2"}'
+# -> {"sql_query":"DELETE FROM employees WHERE department_id = (...)",
+#     "final_answer":"", "awaiting_approval":true}
+
+curl -X POST localhost:8000/api/approve -H 'Content-Type: application/json' \
+  -d '{"thread_id":"demo-2","approved":true}'
+# -> "The requested action would have affected two employees, but no changes
+#     were made to the database."
+```
+
+**`ALLOW_WRITES` decides what "approved" means.** Left off (the default), an
+approved statement still *executes* — Postgres plans it, enforces every
+constraint, and reports the rows it would have touched — and is then rolled back.
+That is what makes the gate demonstrable on a public URL without handing any
+visitor the ability to empty the table. It is not theatre: the answer says
+plainly that nothing was changed. Set it to `true` and the same approval commits.
+
+**The gate needs the checkpointer.** Pausing and resuming spans two HTTP
+requests, so the graph's state has to live somewhere in between — without a
+`thread_id` there is nothing to resume from, and that path keeps the original
+hard block. Offering an approval prompt that cannot be honoured would be worse
+than refusing outright.
+
+**One thing had to change for the gate to be reachable at all.** The generation
+prompt used to say *"only ever write SELECT queries"* — a rule that existed
+precisely *because* there was no gate. Left in place it would have meant
+destructive SQL is never generated, the gate never fires, and the feature demos
+as working only because nothing ever reaches it. On the gated path the model may
+now write a modifying statement when the user explicitly asks for one, since a
+human sees every one of them first.
 
 ## Conversation memory
 

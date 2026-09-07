@@ -144,6 +144,13 @@ Phir browser me URL kholo — chat UI aana chahiye. Ek question poocho aur "Show
 
 `memory_active: false` aaye to Render logs me `Checkpointer setup failed` dhundo — zyadatar `DATABASE_URL` ya Neon connection limit ka issue hota hai.
 
+**Approval gate bhi check karo** (ye bhi checkpointer pe depend karta hai, to memory fail hui to ye bhi chup-chaap band ho jaayega):
+
+- [ ] "Delete all employees from HR" poocho → response me `awaiting_approval: true` aana chahiye aur `final_answer` khaali
+- [ ] UI me approval card dikhna chahiye pending `DELETE` statement ke saath
+- [ ] **Approve** karo → jawab me saaf likha hona chahiye ki rollback hua aur kitni rows par asar padta
+- [ ] Confirm karo ki data waqai nahi badla (`ALLOW_WRITES` off hai)
+
 ## Step 4 — Keep-alive (ye skip mat karna)
 
 Iske bina baaki sab bekaar hai — service so jaayegi aur demo 50 second leta rahega.
@@ -172,7 +179,8 @@ Render 15 minute idle pe sulaata hai, toh 10-minute ping hamesha aage rehta hai.
 | `RATE_LIMIT_REQUESTS` | — | `5` | Per IP |
 | `RATE_LIMIT_WINDOW` | — | `60` | Seconds |
 | `ALLOWED_ORIGINS` | — | `*` | Single-service me same-origin hai, isliye zaroorat nahi. Split deploy me frontend origin set karna |
-| `DISABLE_CHECKPOINTER` | — | unset | `1` karo to conversation memory band. Normally chhodo — memory chalne dena hi chahiye |
+| `ALLOW_WRITES` | — | `false` | Approved write commit ho ya chala ke rollback ho. **Public demo pe `false` hi rakho** — warna koi bhi visitor `DELETE FROM employees` approve karke table khaali kar sakta hai. `false` pe bhi approval flow poora dikhta hai |
+| `DISABLE_CHECKPOINTER` | — | unset | `1` karo to conversation memory band. Normally chhodo — memory chalne dena hi chahiye. **Dhyan do: isse HITL approval gate bhi band ho jaata hai**, kyunki interrupt ko resume karne ke liye checkpointer chahiye |
 | `CHECKPOINTER_POOL_SIZE` | — | `5` | Neon free tier ki connection limit chhoti hai; 5 se upar mat badhao |
 | `HISTORY_TURNS_IN_PROMPT` | — | `3` | Kitne pichhle turns prompt me jaate hain |
 | `LANGCHAIN_TRACING_V2` | — | `false` | `true` → traces LangSmith pe |

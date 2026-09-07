@@ -130,7 +130,62 @@ The fix is in the synthesis system prompt: the model is told the system is stric
 
 The general lesson, and the reason this belongs in the spec rather than a commit message: guarding the *action* is not the same as guarding the *report of the action*, and only end-to-end testing through the real UI surfaced the gap.
 
-**Known limitation, stated honestly:** the keyword guard is substring matching, so it is conservative — a legitimate query containing the word "updated" in a string literal would be blocked. It is a demo-appropriate safety net, not a production authorization model. The correct production answer is a database-level read-only role, which costs nothing and cannot be prompt-injected around. **[Planned]** work is the Guardrails AI validator node and Phase 3 HITL approval, which replaces the hard block with an approval pause.
+**Known limitation, stated honestly:** the keyword check is substring matching, so it is conservative — a legitimate query containing the word "updated" in a string literal is treated as destructive. That is deliberate: a false positive costs one unnecessary approval prompt, a false negative changes data nobody agreed to change. It is a demo-appropriate net, not a production authorization model. The correct production answer is a database-level read-only role, which costs nothing and cannot be prompt-injected around.
+
+**[Planned]** remaining here is the Guardrails AI validator node. The Phase 3 HITL approval is now implemented — see §4a, which replaces the hard block with an approval pause on the `thread_id` path.
+
+---
+
+## 4a. Human-in-the-Loop Approval **[Implemented]**
+
+A destructive query no longer dies at a hard block. It pauses, shows the human the exact statement, and waits.
+
+```
+generate_sql ──[needs_approval]──> await_approval ──[after_approval]──> execute_sql
+     │                              (graph stops here)         │
+     └──[not destructive]──────────────────────────────────────┘
+                                             └──[rejected]──> synthesize
+```
+
+### Why a dedicated node instead of interrupting `execute_sql`
+
+The pinned LangGraph version has no dynamic `interrupt()` — only static `interrupt_before=[...]`, which fires every time the named node is about to run. Putting that on `execute_sql` would pause *every* query, including plain `SELECT`s. A separate `await_approval` node makes the pause **conditional**: routing decides whether this turn passes through the gate at all.
+
+`await_approval` deliberately asks nothing. The graph stops *before* it, so by the time the node actually runs the decision is already in state — the node's job is to record it, so the trace shows both what the run paused for and what it resumed on. A resume that arrives with no decision is recorded as a rejection: silently proceeding would defeat the entire gate.
+
+### HITL requires the checkpointer — that ordering is not a coincidence
+
+Pausing and later resuming means the graph's state has to live somewhere between two HTTP requests. Without a checkpointer there is nothing to resume *from*, so `interrupt_before` is meaningless. The stateless path (no `thread_id`) therefore keeps the original hard block, and that is the right behaviour rather than a gap: **offering an approval prompt that cannot be honoured is worse than refusing outright.** Phase 4 landing before Phase 3 is what made Phase 3 possible.
+
+### The generation prompt had to change, or the gate would be dead code
+
+The system prompt said *"only ever write SELECT queries"*. That constraint existed **because there was no gate** — any write the model produced would have gone straight to the database. Leaving it in place after building the gate would mean destructive SQL is never generated, so the gate never fires, and the whole phase is unreachable code that demos as working because nothing ever reaches it.
+
+So the constraint is now conditional on `hitl_enabled`: on the gated path the model may write an `INSERT`/`UPDATE`/`DELETE` when the user explicitly asks for one, because a human reviews every such statement before it runs. On the stateless path the original hard line stands.
+
+### `ALLOW_WRITES` — approved is not the same as committed
+
+| `ALLOW_WRITES` | Approved statement |
+|---|---|
+| `false` (default) | Executes, then **rolls back**. Postgres plans it, enforces every constraint, and reports the rows it would have touched |
+| `true` | Executes and commits |
+
+This is what lets the approval flow be demonstrated on a public deployment without handing any visitor the ability to empty the table. It is explicitly **not** approval theatre: the response says plainly that the statement was rolled back and how many rows it would have affected. Running in a safe mode and saying so is a different thing from claiming an action happened.
+
+The synthesis system prompt is conditional on the same flag. Hardcoding *"this system is strictly read-only"* was correct before writes existed; leaving it after `ALLOW_WRITES=true` would make the model deny a write that genuinely committed. **The guard has to work in both directions — no false confirmation, and no false reassurance.** That is the same lesson as the false-confirmation bug in §4, applied to its mirror image.
+
+### API
+
+| Endpoint | Behaviour |
+|---|---|
+| `POST /api/query` | Returns `awaiting_approval: true` with the pending statement in `sql_query` and an empty `final_answer` |
+| `POST /api/approve` | `{thread_id, approved}` — resumes the paused graph |
+
+`awaiting_approval` is a distinct flag rather than an inferred one: an empty `final_answer` on its own reads as "nothing found", when in fact the system is waiting on the user. Approving a thread that is not paused returns **409**, not 200 — a double-click or a stale tab is neither a server fault nor a malformed request, and answering 200 would tell the user their decision was applied when nothing happened.
+
+Resume calls `update_state` then `invoke(None)`. Passing the original input again would restart the turn and spend another generation call; `None` means "continue from where you stopped".
+
+`/api/approve` is rate limited alongside `/api/query` — resuming runs a synthesis call, so it costs the same quota as a new question.
 
 ---
 
@@ -314,5 +369,5 @@ Near-term, interview-focused priorities are in [ROADMAP.md](ROADMAP.md) — mult
 | Phase | Enhancement | Technical Impact |
 |---|---|---|
 | Phase 2 | Model Context Protocol (MCP) | Replace the direct SQLAlchemy driver with a standard Postgres MCP server over stdio, so the data access layer becomes a swappable tool rather than hard-wired code |
-| Phase 3 | Human-in-the-Loop (HITL) | LangGraph interrupt before executing destructive queries, replacing today's hard block with an approval pause |
+| ~~Phase 3~~ | ~~Human-in-the-Loop (HITL)~~ | ✅ **Done** — see §4a. Static `interrupt_before` on a dedicated approval node, `/api/approve` to resume, and `ALLOW_WRITES` deciding whether an approved statement commits or runs-and-rolls-back. Still outstanding: the approval is unauthenticated, exactly like `thread_id` — anyone holding the thread id can approve a write on it. Real use needs auth on the approve endpoint, not just on the query |
 | ~~Phase 4~~ | ~~Postgres checkpointer~~ | ✅ **Done** — see §6c. Cross-session conversation memory via LangGraph's persistence layer. Multi-tenant isolation is the part still outstanding: `thread_id` is client-supplied and unauthenticated, so anyone who guesses another thread's id reads that conversation. Fine for a single-user demo, not for multi-tenant use — that needs auth and a per-user namespace on the thread key |

@@ -8,9 +8,20 @@
 
 - ✅ `backend/app/db.py` — PostgreSQL connection + `departments` & `employees` tables (FK) + seed data
 - ✅ `backend/app/graph.py` — LangGraph self-healing state machine (Gemini, model env-configurable)
-- ✅ `backend/app/main.py` — FastAPI (`/health`, `/query` endpoints)
+- ✅ `backend/app/main.py` — FastAPI (`/health`, `/api/query`, `/api/approve`)
 - ✅ `backend/Dockerfile`, `docker-compose.yml`, `.env.example`
-- ✅ Basic destructive-query guard (DROP/DELETE/UPDATE/INSERT block)
+- ✅ **HITL approval gate (Phase 3)** — destructive statement ab block nahi hota, rukta hai:
+  `interrupt_before` ek dedicated `await_approval` node pe, `/api/approve` se resume,
+  aur `ALLOW_WRITES` tay karta hai ki approved statement commit ho ya chal ke rollback ho.
+  **Verified live:** gate ruka (`awaiting_approval: true`), reject pe kuch nahi chala,
+  approve pe statement chala aur rollback hua (2 rows report, data intact), dobara
+  approve karne pe 409.
+  ⚠️ `ALLOW_WRITES=true` wala commit path asli DB pe nahi chalaya (wo sach me rows
+  delete karta) — sirf unit test se covered hai.
+  **Do cheezein build karte waqt pata chali:** (1) HITL checkpointer ke bina possible
+  hi nahi — isliye Phase 4 ka pehle aana zaroori tha; (2) generation prompt ki
+  "only SELECT" line hataani padi, warna destructive SQL banti hi nahi aur poora
+  phase dead code ban jaata.
 - ✅ `docs/INTERVIEW_NOTES.md` — pitch, har design decision ka defence, anticipated Q&A, honesty checklist
 - ✅ Frontend chat UI — React + Vite, retry badge + collapsible SQL/trace, Nginx proxy ke saath
 - ✅ Multi-table schema — `departments` + `employees` FK ke saath, JOIN questions ab possible hain
