@@ -7,7 +7,9 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import END, StateGraph
 
 from app.checkpointer import get_checkpointer
-from app.db import get_schema_description, run_sql, run_write
+# Data access ek layer ke peeche hai (direct driver ya MCP tools) — graph ko
+# farak nahi padta kaunsa chal raha hai. Dekho app/data_access.py.
+from app.data_access import get_schema_description, run_sql, run_write
 from app.validators import validate_answer
 
 # Env se override ho sakta hai — eval harness isko 0 set karke measure karta hai

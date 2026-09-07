@@ -1,5 +1,5 @@
-fastapi==0.115.0
-uvicorn[standard]==0.30.6
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
 langgraph==0.2.34
 langchain==0.3.3
 langchain-google-genai==2.0.1
@@ -16,4 +16,13 @@ psycopg2-binary==2.9.9
 langgraph-checkpoint-postgres==3.0.5
 psycopg[binary,pool]==3.3.5
 python-dotenv==1.0.1
-pydantic==2.9.2
+pydantic==2.13.5
+
+# Model Context Protocol. The agent talks to the database through an MCP server
+# over stdio instead of importing the driver directly - see docs/TECHNICAL_SPEC.md.
+#
+# This is what forced the fastapi/pydantic bumps above: mcp needs pydantic>=2.12
+# and starlette 1.6, and fastapi 0.115 pins starlette<0.42. Adding mcp on the old
+# pins produced an app that imported and then died at request time - the worst
+# kind of dependency break, because pip reports success.
+mcp==2.2.0
