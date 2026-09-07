@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.checkpointer import get_checkpointer
-from app.db import init_db
+from app.db import get_stats, init_db
 from app.graph import resume_agent, run_agent
 from app.ratelimit import rate_limit_middleware
 
@@ -72,6 +72,9 @@ class QueryResponse(BaseModel):
     khaali `final_answer` apne aap me "kuch nahi mila" jaisa dikhta, jabki asal
     me system user ka jawab maang raha hai.
     """
+    guardrail_flags: list[str] = []
+    """Output guard ne kya pakda. Khaali = kuch nahi mila."""
+
     memory_active: bool = False
     """Kya is turn me sach me conversation memory chali.
 
@@ -107,8 +110,15 @@ def _to_response(result: dict, thread_id: str | None) -> QueryResponse:
         retry_count=result["retry_count"],
         thread_id=thread_id,
         awaiting_approval=result.get("approval_status") == "pending",
+        guardrail_flags=result.get("guardrail_flags") or [],
         memory_active=bool(thread_id and get_checkpointer() is not None),
     )
+
+
+@api.get("/stats")
+def stats() -> dict:
+    """Dashboard aggregates. Rate limiter se bahar — koi LLM call nahi hoti."""
+    return get_stats()
 
 
 @api.post("/query", response_model=QueryResponse)

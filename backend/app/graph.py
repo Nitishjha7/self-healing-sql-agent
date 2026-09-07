@@ -8,6 +8,7 @@ from langgraph.graph import END, StateGraph
 
 from app.checkpointer import get_checkpointer
 from app.db import get_schema_description, run_sql, run_write
+from app.validators import validate_answer
 
 # Env se override ho sakta hai — eval harness isko 0 set karke measure karta hai
 # ki self-healing loop ke bina accuracy kitni girti hai.
@@ -40,6 +41,33 @@ ALLOW_WRITES = os.environ.get("ALLOW_WRITES", "").lower() in ("1", "true", "yes"
 # usme se entities utha leta hai. Teen follow-up chain ke liye kaafi hai.
 HISTORY_TURNS_IN_PROMPT = int(os.environ.get("HISTORY_TURNS_IN_PROMPT", "3"))
 
+# UI ko dikhane ke liye kitni rows bhejni hain. Ye rows checkpointer me likhi
+# jaati hain, to bina cap ke ek "SELECT * FROM employees" poori table ko har
+# conversation checkpoint me daal deta.
+MAX_RESULT_ROWS = 50
+
+
+def _serializable(rows: list) -> list:
+    """Postgres ke Decimal/date jaise types ko JSON-safe banata hai.
+
+    `Decimal` ko `float` me isliye badalte hain ki wo JSON me seedha nahi jaata,
+    aur baaki anjaan types ko `str` — checkpointer bhi inhe serialize karta hai,
+    to ek naya column type API aur memory dono ko ek saath todta.
+    """
+    from datetime import date, datetime
+    from decimal import Decimal
+
+    def clean(v):
+        if isinstance(v, Decimal):
+            return float(v)
+        if isinstance(v, (date, datetime)):
+            return v.isoformat()
+        if v is None or isinstance(v, (str, int, float, bool)):
+            return v
+        return str(v)
+
+    return [{k: clean(v) for k, v in row.items()} for row in rows]
+
 
 class ConversationTurn(TypedDict):
     question: str
@@ -56,6 +84,14 @@ class AgentState(TypedDict):
     retry_count: int
     final_answer: str
     logs: List[str]
+
+    guardrail_flags: List[str]
+    """Output guard ne is turn me kya pakda (khaali list = kuch nahi).
+
+    Response me jaata hai. Chup-chaap redact karke aage badhne ka matlab hota
+    "guard ne kaam kiya" aur "guard ki kabhi zaroorat hi nahi padi" dono ek jaise
+    dikhna — aur tab pata hi nahi chalta ki guard kaam kar raha hai ya nahi.
+    """
 
     hitl_enabled: bool
     """Is turn me approval gate available hai ya nahi.
@@ -305,7 +341,18 @@ def execute_sql(state: AgentState) -> AgentState:
     try:
         rows = run_sql(sql_query)
         logs.append(f"Execution succeeded, {len(rows)} row(s) returned.")
-        return {**state, "query_result": str(rows), "error": "", "logs": logs}
+        return {
+            **state,
+            "query_result": str(rows),
+            # UI ke liye rows structured shakl me bhi, taaki wo table dikha sake.
+            # Cap isliye ki ye checkpointer me likhi jaati hain aur har response
+            # me jaati hain — ek "SELECT * FROM employees" jaisa sawaal poori
+            # table ko conversation state me daal deta.
+            "result_rows": _serializable(rows[:MAX_RESULT_ROWS]),
+            "row_count": len(rows),
+            "error": "",
+            "logs": logs,
+        }
     except Exception as exc:
         logs.append(f"Execution failed: {exc}")
         return {
@@ -419,11 +466,24 @@ def synthesize_and_validate(state: AgentState) -> AgentState:
         ]
     )
     logs.append("Synthesized final answer.")
+
+    # Prompt me schema-leakage ki jo baat likhi hai, wo yahan **enforce** hoti
+    # hai. Prompt ek guzarish hai; ye check ek guarantee. Sirf model se keh dena
+    # ki wo column naam na bole, aur maan lena ki usne suna — wo validation nahi,
+    # ummeed hai.
+    answer, flags = validate_answer(response.content)
+    if flags:
+        # Chup-chaap theek karke aage badhna galat hoga: leak hua tha ye baat
+        # trace me dikhni chahiye, warna guard ka kaam karna aur guard ka kabhi
+        # zaroorat na padna, dono ek jaise dikhte hain.
+        logs.append(f"Output guard rewrote the answer: {', '.join(flags)}.")
+
     return {
         **state,
-        "final_answer": response.content,
+        "final_answer": answer,
+        "guardrail_flags": flags,
         "logs": logs,
-        "history": _append_turn(state, response.content),
+        "history": _append_turn(state, answer),
     }
 
 
@@ -510,6 +570,7 @@ def run_agent(question: str, thread_id: Optional[str] = None) -> AgentState:
         "logs": [],
         # Pichhle turn ki approval is turn ki write ko authorize na kar de.
         "approval_status": "",
+        "guardrail_flags": [],
         # Gate tabhi hai jab checkpointer hai — interrupt ko state save karne ki
         # jagah chahiye. Isi se tay hota hai ki model write likh sakta hai ya nahi.
         "hitl_enabled": checkpointer is not None,
