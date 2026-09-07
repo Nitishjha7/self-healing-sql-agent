@@ -1,4 +1,5 @@
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import APIRouter, FastAPI, HTTPException
@@ -11,7 +12,20 @@ from app.db import get_schema_overview, get_stats, init_db
 from app.graph import resume_agent, run_agent
 from app.ratelimit import rate_limit_middleware
 
-app = FastAPI(title="Self-Healing Data Query Agent")
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """Tables banao/seed karo, phir serve karo.
+
+    `@app.on_event("startup")` ki jagah — wo FastAPI ke naye versions me
+    deprecated hai, aur MCP ke liye fastapi 0.141 pe jaana pada. Shutdown side
+    jaan-boojh ke khaali hai: checkpointer ka connection pool aur MCP bridge
+    dono daemon hain aur process ke saath hi khatam ho jaate hain.
+    """
+    init_db()
+    yield
+
+
+app = FastAPI(title="Self-Healing Data Query Agent", lifespan=lifespan)
 
 # Local dev serves the frontend through nginx on the same origin, and the
 # single-service image serves it from this app — neither needs CORS. Only a
@@ -89,11 +103,6 @@ class QueryResponse(BaseModel):
     chahiye: UI ko pata hona chahiye ki follow-up kaam karega ya nahi, warna user
     ko lagega agent bhool gaya jabki memory kabhi on hi nahi thi.
     """
-
-
-@app.on_event("startup")
-def on_startup() -> None:
-    init_db()
 
 
 # Everything the SPA calls lives under /api so it never collides with a static

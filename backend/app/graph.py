@@ -10,6 +10,7 @@ from app.checkpointer import get_checkpointer
 # Data access ek layer ke peeche hai (direct driver ya MCP tools) — graph ko
 # farak nahi padta kaunsa chal raha hai. Dekho app/data_access.py.
 from app.data_access import get_schema_description, run_sql, run_write
+from app.data_access import mode as data_access_mode
 from app.validators import validate_answer
 
 # Env se override ho sakta hai — eval harness isko 0 set karke measure karta hai
@@ -348,7 +349,11 @@ def execute_sql(state: AgentState) -> AgentState:
 
     try:
         rows = run_sql(sql_query)
-        logs.append(f"Execution succeeded, {len(rows)} row(s) returned.")
+        # Data access mode trace me dikhta hai. MCP on karke bhi kuch alag na
+        # dikhna matlab ye pata hi na chalna ki wo actually chala ya chup-chaap
+        # direct driver pe gir gaya.
+        via = " via MCP tool" if data_access_mode() == "mcp" else ""
+        logs.append(f"Execution succeeded{via}, {len(rows)} row(s) returned.")
         return {
             **state,
             "query_result": str(rows),

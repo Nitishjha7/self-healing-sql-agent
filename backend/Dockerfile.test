@@ -5,6 +5,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt pytest
 COPY app ./app
+COPY mcp_server ./mcp_server
 COPY tests ./tests
 COPY pytest.ini .
 CMD ["python", "-m", "pytest", "-q"]

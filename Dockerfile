@@ -31,6 +31,7 @@ COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/app ./app
+COPY backend/mcp_server ./mcp_server
 COPY --from=frontend /fe/dist ./static
 
 EXPOSE 8000
