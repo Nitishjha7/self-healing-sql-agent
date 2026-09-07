@@ -14,8 +14,11 @@ The Self-Healing Data Query Agent solves this with cyclical graph-based executio
 
 - **Cyclic state graph** — LangGraph conditional edges implement a stateful retry loop that re-enters the generation node carrying the failure context. **[Implemented]**
 - **Error-informed regeneration** — the retry prompt contains the previous SQL *and* the exact database exception, so the model corrects a specific fault rather than resampling blindly. **[Implemented]**
-- **Read-only enforcement** — destructive SQL is blocked before it reaches the database. **[Implemented]**
-- **Output safety** — synthesis runs under a system prompt that forbids schema leakage and bulk salary disclosure. A dedicated Guardrails AI validator node is **[Planned]**.
+- **Human-in-the-loop on writes** — a modifying statement pauses the graph and shows the human the exact SQL before it runs. **[Implemented — §4a]**
+- **Deterministic output guard** — the final answer is scanned and rewritten for schema identifiers and leaked SQL. The prompt asks; the guard enforces. **[Implemented — §4b]**
+- **Conversation memory** — a Postgres checkpointer keeps state between turns, so follow-ups resolve against earlier answers. **[Implemented — §6c]**
+- **Protocol-mediated data access** — the database is reachable through an MCP server over stdio, so the data layer is a swappable tool rather than an import. **[Implemented — §6d]**
+- **Measured, not asserted** — an evaluation harness scores execution accuracy with the loop on and off across three schema conditions. **[Implemented — §6b]**
 - **Full-stack decoupling** — the state machine is exposed via a modular FastAPI REST interface, with a React frontend and Docker orchestration.
 
 ---
@@ -27,16 +30,21 @@ Three layers: UI client, orchestration/backend, and data persistence.
 | Component | Technology | Primary Role | Status |
 |---|---|---|---|
 | Agent Workflow | LangGraph (Python) | State machine, node transitions, conditional self-correction branching | Implemented |
-| LLM Inference | LangChain + Google Gemini 2.0 Flash | SQL generation, error reflection, natural language synthesis | Implemented |
+| Conversation memory | LangGraph `PostgresSaver` | Durable per-`thread_id` checkpoints; also what makes the HITL interrupt possible | Implemented |
+| LLM Inference | LangChain + Google Gemini (`GEMINI_MODEL`) | SQL generation, error reflection, natural language synthesis | Implemented |
 | Data Store | PostgreSQL 16 (SQLAlchemy Core + psycopg2) | Target relational database for generated queries | Implemented |
+| Data access | Direct driver, or MCP server over stdio (`USE_MCP`) | Makes the data layer a swappable tool rather than an import | Implemented |
 | API Backend | FastAPI + Uvicorn | REST endpoints serving agent execution, trace logs, responses | Implemented |
-| Output Validation | Guardrails AI | Dedicated validator node for toxicity / groundedness / schema integrity | Planned |
-| Frontend UI | React + Vite | Chat interface exposing agent trace logs and generated SQL | Planned |
-| Containerization | Docker & Docker Compose | Three-service stack with Nginx serving the frontend | Implemented |
+| Write safety | LangGraph `interrupt_before` + `/api/approve` | Human approves every modifying statement before it runs | Implemented |
+| Output Validation | Deterministic guard (`app/validators.py`) | Strips schema identifiers and leaked SQL from the answer | Implemented |
+| Frontend UI | React 18 + Vite | Chat, live agent-trace rail, dashboard, schema explorer | Implemented |
+| Containerization | Docker & Docker Compose | Three-service stack, plus a single-service deploy image | Implemented |
 
-### Why Gemini 2.0 Flash
+### Why Gemini
 
-Chosen over Groq/Llama and GPT for three reasons: a genuinely usable free tier (this is a portfolio project, not a funded product), low latency on short structured outputs — which matters because a self-healing run can issue up to 4 generation calls plus a synthesis call — and strong instruction-following on "return only SQL, no prose", which keeps the `_extract_sql` parser simple. `temperature=0` throughout: SQL generation wants determinism, not creativity. The provider sits behind LangChain's chat interface, so swapping it is a one-line change in `_llm()`.
+Chosen over Groq/Llama and GPT for three reasons: a genuinely usable free tier (this is a portfolio project, not a funded product), low latency on short structured outputs — which matters because a self-healing run can issue up to 4 generation calls plus a synthesis call — and strong instruction-following on "return only SQL, no prose", which keeps the `_extract_sql` parser simple. `temperature=0` throughout: SQL generation wants determinism, not creativity.
+
+The **model id is an environment variable, not a constant**, and that turned out to matter: `gemini-2.0-flash` and then `gemini-2.5-flash` both started returning 404 during this project's lifetime. A hard-coded model name is a time bomb in any LLM app. The provider sits behind LangChain's chat interface, so swapping vendors is a one-line change in `_llm()`.
 
 ### Why PostgreSQL, not SQLite
 
@@ -337,6 +345,36 @@ The checkpointer is a process-wide singleton, cached with the failure result. It
 
 ---
 
+## 6d. Model Context Protocol **[Implemented]**
+
+`USE_MCP=true` routes every database call through an MCP server running as a subprocess, spoken to over stdio. `USE_MCP` unset keeps the direct driver. `app/data_access.py` is the only module that knows which is in play — `graph.py` calls the same three functions either way.
+
+```
+graph.py ──> data_access.py ──┬── direct ──> app/db.py ──> psycopg2 ──> Postgres
+                              │
+                              └── mcp ──> mcp_client (stdio) ──> mcp_server/server.py ──> app/db.py ──> Postgres
+```
+
+### What this buys, and what it costs
+
+The MCP path is strictly slower — a subprocess, a JSON-RPC round trip, and a serialization hop that the direct call does not have. It is off by default for exactly that reason. What it buys is that **data access stops being an import and becomes an interface**: the same agent could be pointed at a third-party MCP server — GitHub, a filesystem, a different database — without a line changing in the graph, and this server can be driven by any other MCP client because the protocol is not ours.
+
+Being honest about the limit: this talks to *our own* server. It demonstrates the protocol end to end, not an integration with someone else's tool.
+
+### Three things this surfaced
+
+**Errors must survive the transport.** The self-healing loop runs on the text of a Postgres error, including its `HINT:`. An MCP tool that raised on failure would deliver a transport exception and lose that message — the loop would keep "working" and never fire. So the server returns `{"ok": false, "error": ...}` as a *successful* tool result, and `data_access` turns it back into the same exception the direct path raises. There is a test for exactly this, because the failure mode is silent.
+
+**Sync and async had to meet somewhere.** The MCP SDK is async and keeps the stdio session inside a long-lived `async with`; the graph nodes are sync. Calling `asyncio.run()` per query would spawn a Python subprocess for every question. Making the whole stack async would rewrite the agent for the sake of one toggle. The chosen third option is a background thread owning an event loop, with the session opened once and sync callers marshalling work onto it via `run_coroutine_threadsafe`. That bridge is the real cost of MCP here, and it lives in one file.
+
+**The transport must not decode payloads.** The first version JSON-decoded every tool result and broke on `describe_schema`, which returns plain text. Knowing each tool's payload shape is the caller's job; the bridge only moves bytes.
+
+### Failing open
+
+If the server cannot start — wrong SDK version, missing module, a crash — the client logs the reason once, sets the toggle off, and the agent runs on the direct driver. This was not theoretical: the first run failed because MCP 2.x renamed `FastMCP` to `MCPServer`, and the fallback behaved exactly as designed. A silently broken MCP path would be the worst outcome, so the trace line says `via MCP tool` only when it genuinely went that way.
+
+---
+
 ## 7. End-to-End Execution Flow
 
 1. **Ingestion** — the user submits a question (e.g. "Who earns more than 80000 in Engineering?").
@@ -368,6 +406,6 @@ Near-term, interview-focused priorities are in [ROADMAP.md](ROADMAP.md) — mult
 
 | Phase | Enhancement | Technical Impact |
 |---|---|---|
-| Phase 2 | Model Context Protocol (MCP) | Replace the direct SQLAlchemy driver with a standard Postgres MCP server over stdio, so the data access layer becomes a swappable tool rather than hard-wired code |
+| ~~Phase 2~~ | ~~Model Context Protocol (MCP)~~ | ✅ **Done** — `mcp_server/server.py` exposes the database as MCP tools over stdio; `app/data_access.py` picks the transport and `USE_MCP` toggles it. Default off: a direct driver call is always faster, and MCP buys swappability rather than speed. What it does not yet do is talk to a *third-party* MCP server — the point of the protocol is that it could, without the agent changing |
 | ~~Phase 3~~ | ~~Human-in-the-Loop (HITL)~~ | ✅ **Done** — see §4a. Static `interrupt_before` on a dedicated approval node, `/api/approve` to resume, and `ALLOW_WRITES` deciding whether an approved statement commits or runs-and-rolls-back. Still outstanding: the approval is unauthenticated, exactly like `thread_id` — anyone holding the thread id can approve a write on it. Real use needs auth on the approve endpoint, not just on the query |
 | ~~Phase 4~~ | ~~Postgres checkpointer~~ | ✅ **Done** — see §6c. Cross-session conversation memory via LangGraph's persistence layer. Multi-tenant isolation is the part still outstanding: `thread_id` is client-supplied and unauthenticated, so anyone who guesses another thread's id reads that conversation. Fine for a single-user demo, not for multi-tenant use — that needs auth and a per-user namespace on the thread key |

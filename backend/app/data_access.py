@@ -20,6 +20,8 @@ self-healing chup-chaap kaam karna band kar deta.
 
 from __future__ import annotations
 
+import json
+
 from app import db
 from app.mcp_client import get_client
 
@@ -38,10 +40,7 @@ def get_schema_description() -> str:
     if client is None:
         return db.get_schema_description()
 
-    result = client.call("describe_schema", {})
-    # Ye tool plain text deta hai, JSON nahi — bridge ne use decode karne ki
-    # koshish ki hogi aur str hi wapas mila hoga.
-    return result if isinstance(result, str) else str(result)
+    return client.call("describe_schema", {})
 
 
 def run_sql(query: str) -> list[dict]:
@@ -49,7 +48,7 @@ def run_sql(query: str) -> list[dict]:
     if client is None:
         return db.run_sql(query)
 
-    result = client.call("run_select", {"query": query})
+    result = json.loads(client.call("run_select", {"query": query}))
     if not result.get("ok"):
         # Postgres ka message wapas ek exception me — taaki `execute_sql` ka
         # `except` block dono raaston me bilkul ek jaisa chale.
@@ -62,7 +61,7 @@ def run_write(query: str, commit: bool) -> int:
     if client is None:
         return db.run_write(query, commit=commit)
 
-    result = client.call("run_modify", {"query": query, "commit": commit})
+    result = json.loads(client.call("run_modify", {"query": query, "commit": commit}))
     if not result.get("ok"):
         raise DataAccessError(result.get("error", "statement failed"))
     return result["affected"]

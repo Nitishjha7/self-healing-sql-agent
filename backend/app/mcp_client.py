@@ -99,21 +99,26 @@ class _McpBridge:
         finally:
             self._ready.set()
 
-    def call(self, tool: str, args: dict[str, Any], timeout: float = 30.0) -> Any:
-        """Tool ko sync taraf se bulata hai aur JSON-decoded result deta hai."""
+    def call(self, tool: str, args: dict[str, Any], timeout: float = 30.0) -> str:
+        """Tool ko sync taraf se bulata hai aur uska text content deta hai.
+
+        **Yahan JSON decode jaan-boojh ke nahi hota.** Pehla version karta tha,
+        aur wo `describe_schema` par toot gaya — wo plain text deta hai, JSON
+        nahi. Transport ko ye tay nahi karna chahiye ki har tool ka payload kis
+        shakl me hai; wo caller jaanta hai. Ye layer sirf bytes laati hai.
+        """
         future = asyncio.run_coroutine_threadsafe(
             self._session.call_tool(tool, args), self._loop
         )
         result = future.result(timeout=timeout)
 
         # MCP tool results content blocks ki list hote hain. Hamare tools ek
-        # single JSON text block dete hain, par defensively padhte hain: agar
-        # server kabhi shape badle to yahan saaf error aana chahiye, silently
-        # `None` nahi.
+        # hi text block dete hain, par defensively padhte hain: server kabhi
+        # shape badle to yahan saaf error aana chahiye, chup-chaap `None` nahi.
         for block in result.content:
             text = getattr(block, "text", None)
             if text is not None:
-                return json.loads(text)
+                return text
         raise McpUnavailable(f"Tool {tool} returned no text content")
 
 

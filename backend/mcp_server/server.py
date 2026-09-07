@@ -16,11 +16,15 @@ from __future__ import annotations
 
 import json
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from app.db import get_schema_description, run_sql, run_write
 
-mcp = FastMCP("sql-agent-db")
+# MCP SDK 2.x me `FastMCP` ka naam `MCPServer` ho gaya. Ye pehli koshish me toota
+# tha, aur wo failure achhi tarah dikhi: client ne fallback lete hue direct
+# driver use kar liya aur wajah log kar di — bilkul waisa hi jaisa design kiya
+# tha. Ek chup-chaap fail hone wala MCP path sabse kharaab nateeja hota.
+mcp = MCPServer("sql-agent-db")
 
 
 @mcp.tool()

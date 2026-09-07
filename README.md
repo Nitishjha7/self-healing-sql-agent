@@ -34,6 +34,8 @@ Most Text-to-SQL demos are a single LLM call: if the generated SQL is wrong, the
 If the request carried a `thread_id`, step 2 also receives the earlier turns of that
 conversation, and step 5's answer is appended to them — see [Conversation memory](#conversation-memory).
 
+**New here? Start with [docs/PROJECT_WALKTHROUGH.md](docs/PROJECT_WALKTHROUGH.md)** — one file with the request flowchart, how each piece was built and why, and how the whole system works today.
+
 See [docs/TECHNICAL_SPEC.md](docs/TECHNICAL_SPEC.md) for the architecture and state schema, [docs/CODE_NOTES.md](docs/CODE_NOTES.md) for why each file/dependency exists, and [docs/INTERVIEW_NOTES.md](docs/INTERVIEW_NOTES.md) for the pitch, trade-offs, and anticipated Q&A.
 
 ## Implementation Status
@@ -48,11 +50,12 @@ Honest snapshot — docs describe what exists, roadmap items are marked as such.
 - ✅ Two-table schema — `departments` + `employees` with a foreign key, so questions require real JOINs
 - ✅ Evaluation harness — 20 questions with gold SQL, execution-accuracy metric, retries-on vs retries-off comparison ([eval/](eval/))
 - ✅ Conversation memory — LangGraph `PostgresSaver` checkpointer, per-`thread_id`, so follow-up questions can refer back ([how it works](#conversation-memory))
-- ✅ Test suite — 37 tests covering memory, approval-gate and output-guard semantics; no API key or database needed
+- ✅ Test suite — 46 tests covering memory, approval-gate, output-guard and data-access semantics; no API key or database needed
 - ✅ Human-in-the-loop approval — destructive statements pause for review instead of being blocked; `ALLOW_WRITES` decides whether an approved statement commits or runs-and-rolls-back ([how it works](docs/TECHNICAL_SPEC.md))
 - ✅ Output validation — deterministic guard that strips schema identifiers and leaked SQL from the answer, reported via `guardrail_flags` ([why not Guardrails AI](docs/CODE_NOTES.md))
 - ✅ React + Vite app — sidebar shell, chat with SQL and result table, live agent-trace rail, and a dashboard of database figures plus the measured eval result
 - ✅ Deployment ready — single-service Docker image (FastAPI serves the API + built SPA on one URL), per-IP rate limiting, `render.yaml`, guide in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
+- ✅ MCP — database access goes through an MCP server over stdio when `USE_MCP=true`, direct driver otherwise ([why both](docs/TECHNICAL_SPEC.md))
 - ⬜ Actually deployed (no live URL yet) — remaining steps are checklisted at the top of [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
 
 ## Project Structure
@@ -62,7 +65,7 @@ Dockerfile  Single-service deploy image (React build + FastAPI)
 backend/    FastAPI app, LangGraph agent, Postgres checkpointer, tests
 frontend/   React + Vite app — chat, agent-trace rail, dashboard
 eval/       Evaluation harness, gold questions, measured results
-docs/       Setup, technical spec, code notes, roadmap, interview notes, deployment
+docs/       PROJECT_WALKTHROUGH (start here), spec, code notes, interview notes, deployment
 ```
 
 ## Setup
