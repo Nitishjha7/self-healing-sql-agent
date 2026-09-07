@@ -28,7 +28,9 @@ WINDOW_SECONDS = int(os.environ.get("RATE_LIMIT_WINDOW", "60"))
 # platform's own health checks are never throttled.
 # /api/approve bhi yahan hai: resume ek synthesis LLM call chalata hai, to wo
 # bhi utna hi quota kharch karta hai jitna ek naya sawaal.
-LIMITED_PATHS = {"/api/query", "/api/approve"}
+# /api/dashboard yahan sabse zaroori hai: wo ek request me MAX_WIDGETS agent runs
+# chalata hai, matlab ek call me 6-9 LLM calls.
+LIMITED_PATHS = {"/api/query", "/api/approve", "/api/dashboard"}
 
 _hits: dict[str, deque[float]] = defaultdict(deque)
 

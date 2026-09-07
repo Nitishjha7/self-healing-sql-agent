@@ -274,7 +274,60 @@ kar diya tha. Client ne wajah log ki, toggle off kiya, aur direct driver pe chal
 raha — bilkul jaisa design tha. Trace me `via MCP tool` **tabhi** likha aata hai
 jab sach me MCP se gaya ho.
 
-### Step 10 — Deploy ke liye taiyari
+### Step 10 — Dashboard ek vaakya se (Phase 5)
+
+**Kya:** "Create a dashboard showing salary and headcount by department" → request
+sub-questions me tootti hai, har sawaal **usi self-healing agent** se chalta hai,
+aur har result ke liye widget chuna jaata hai.
+
+**Do faisle jo poora dhaancha tay karte hain:**
+
+**1. Sub-questions LLM banata hai, widgets nahi.** Sawaal me judgement hai —
+"salary ke baare me kya poochha jaana chahiye" ka koi ek jawab nahi. Widget me
+judgement nahi hai: ek row ek column = KPI, chaar categories = bar. Wo data ki
+**shakl** se tay hota hai. Uske liye ek aur LLM call lagana ek deterministic
+faisle ko probabilistic bana dena hai.
+
+**2. Har sub-question poore agent se guzarta hai**, kisi chhote raaste se nahi —
+matlab retry loop, output guard, approval gate sab lagte hain. Alag SQL path hota
+to wo sab bypass ho jaata, aur system ke sabse kam dekhe jaane wale raaste par
+sabse kam safety hoti.
+
+**🐛 Pehle hi asli dashboard me ek dataviz bug nikla.** "Average salary by
+department" ko **donut** mil gaya. Donut kehta hai *"ye hisse ek poore ke hain"* —
+par averages jodte nahi; chaar departments ke average salary ka yog kisi cheez ko
+represent nahi karta. **Wo chart data ke baare me ek baat kah raha tha jo sach
+nahi thi.**
+
+Fix: donut sirf tab jab measure **jodne layak** ho (`count`, `total`, `sum`,
+`headcount`, `budget`), aur kabhi nahi jab wo `avg`/`rate`/`percent` ho. Naam se
+andaza perfect nahi hai, par galat hone par nateeja **bar** hai — jo hamesha
+imaandaar rehta hai.
+
+**Widget cap 4 hai:** har widget ek poora agent run hai (1-2 LLM calls, retry pe
+aur zyada), aur free tier ~15 req/min deta hai. Zyada rakhne se pehla hi dashboard
+poora quota kha jaata.
+
+### Step 11 — Power BI export (Phase 6)
+
+**Kya:** generated dashboard se do artifacts — ek `.pbids` connection file, aur
+har widget ke liye ek Power Query (M) script jisme agent ki generated SQL hai.
+
+**Ye "Power BI integration" nahi hai, aur use aisa kehna galat hoga.** Service me
+dataset publish karne ke liye Azure AD app registration, ek tenant, aur workspace
+permissions chahiye — teeno is project ke paas nahi hain. UI me bhi ise **export**
+hi likha hai. Ek button jo integration ka bharam de, wo usi kism ka jhooth hai
+jaisa ek chart jo apne data ko flatter kare.
+
+**Do faisle:**
+- **DirectQuery, Import nahi** — Import ek snapshot bana deta aur Power BI wala
+  dashboard is database se chupchaap purana hota jaata.
+- **`.pbids` me credentials kabhi nahi** — ye file user ke disk par jaati hai.
+  Power BI khud credentials maangta hai aur apne store me rakhta hai. Iske liye
+  ek alag test hai, kyunki ye wahi galti hai jo `.env.example` me asli key daalne
+  se hui thi.
+
+### Step 12 — Deploy ke liye taiyari
 
 - **Per-IP rate limit** — Gemini free tier poore project ko ~15 req/min deta hai,
   sab visitors me shared. Bina limit ke ek bot demo ko interview se pehle hi maar
@@ -350,12 +403,14 @@ prompt injection se bypass ho hi nahi sakta. Ye layers uski jagah nahi lete.
 
 | | |
 |---|---|
-| **46 unit tests** | memory · approval gate · output guard · data access. Koi API key ya DB nahi chahiye |
+| **69 unit tests** | memory · approval gate · output guard · data access · widget selection · Power BI export. Koi API key ya DB nahi chahiye |
 | Follow-up + restart | Container restart karke usi thread me follow-up chala — history wapas aayi |
 | HITL cycle | Gate ruka · reject pe kuch nahi chala · approve pe statement chala aur rollback hua (2 rows report, data intact) · dobara approve pe 409 |
 | MCP round trip | schema, rows, dry-run write — aur **error message HINT ke saath preserve** |
 | Full agent on MCP | `Execution succeeded via MCP tool` |
 | Eval | 3 conditions, [numbers](../eval/RESULTS.md) |
+| Dashboard generation | Ek request → 4 widgets, sahi types (kpi · donut · bar · table) |
+| Power BI export | `.pbids` valid JSON, DirectQuery, credentials nadarad; M script me SQL escaped |
 | Images | test, backend, frontend, single-service — sab build hoti hain |
 
 **Jo verify NAHI hua, aur ye bhi likha hona chahiye:**
@@ -407,6 +462,8 @@ docker compose run --rm --no-deps -v "$PWD/eval:/app/eval" \
 |---|---|
 | `POST /api/query` | Sawaal → answer + SQL + rows + trace |
 | `POST /api/approve` | Ruki hui conversation ko resume (409 agar kuch pending nahi) |
+| `POST /api/dashboard` | Ek vaakya → kai widgets, har ek poore agent se |
+| `POST /api/dashboard/export` | Dashboard → `.pbids` + Power Query scripts |
 | `GET /api/schema` | Columns, row counts, aur wahi text jo model ko jaata hai |
 | `GET /api/stats` | Dashboard aggregates |
 | `GET /health` | Platform healthcheck + uptime ping (rate limit se bahar) |
@@ -419,6 +476,7 @@ docker compose run --rm --no-deps -v "$PWD/eval:/app/eval" \
 | `MAX_RETRIES` | `3` | Eval ise `0` karke loop ka contribution isolate karta hai |
 | `ALLOW_WRITES` | `false` | Approved write commit ho ya chal ke rollback |
 | `USE_MCP` | `false` | Database MCP tools se ya seedha driver se |
+| `DASHBOARD_MAX_WIDGETS` | `4` | Har widget ek poora agent run hai — cap quota bachata hai |
 | `DISABLE_CHECKPOINTER` | unset | Memory band — **aur iske saath HITL gate bhi**, kyunki interrupt ko checkpointer chahiye |
 | `RATE_LIMIT_REQUESTS` | `5` | Per IP, per window |
 
@@ -431,5 +489,7 @@ docker compose run --rm --no-deps -v "$PWD/eval:/app/eval" \
 | `backend/app/checkpointer.py` | Conversation memory, lazy + fail-open |
 | `backend/app/validators.py` | Output guard |
 | `backend/mcp_server/server.py` | Database as MCP tools |
+| `backend/app/dashboard.py` | Request → sub-questions → widgets (shape se, LLM se nahi) |
+| `backend/app/powerbi.py` | Power BI export artifacts |
 | `eval/run_eval.py` | Execution-accuracy harness |
 | `frontend/src/TracePanel.jsx` | Wo view jo self-healing ko **dikhata** hai |

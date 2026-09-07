@@ -5,6 +5,7 @@ import Dashboard from "./Dashboard.jsx";
 import TracePanel from "./TracePanel.jsx";
 import SqlBlock from "./SqlBlock.jsx";
 import { SchemaView, HistoryView, EvalView, SettingsView } from "./Views.jsx";
+import GeneratedDashboard from "./GeneratedDashboard.jsx";
 import {
   IconActivity,
   IconBrain,
@@ -49,6 +50,7 @@ const FOLLOW_UPS = [
 const NAV = [
   { id: "chat", label: "Chat", Icon: IconChat },
   { id: "dashboard", label: "Dashboard", Icon: IconGrid },
+  { id: "build", label: "Build Dashboard", Icon: IconChart },
   { id: "schema", label: "Schema Explorer", Icon: IconTable },
   { id: "history", label: "Query History", Icon: IconClock },
   { id: "evals", label: "Evaluations", Icon: IconChart, badge: "20" },
@@ -235,6 +237,9 @@ export default function App() {
               />
             )}
             {view === "dashboard" && <Dashboard apiBase={API_BASE} />}
+            {view === "build" && (
+              <GeneratedDashboard apiBase={API_BASE} threadId={threadId} />
+            )}
             {view === "schema" && <SchemaView apiBase={API_BASE} />}
             {view === "history" && <HistoryView turns={turns} onAsk={ask} />}
             {view === "evals" && <EvalView />}
@@ -349,6 +354,10 @@ function Sidebar({ view, onView, onNew, busy, memoryActive, turns }) {
 const TITLES = {
   chat: null,
   dashboard: ["Overview", "Live figures from the database, and the measured evaluation result."],
+  build: [
+    "Build a Dashboard",
+    "Describe what you want. Each question runs through the same self-healing agent.",
+  ],
   schema: ["Schema Explorer", "Exactly what the agent is told about your database — nothing more."],
   history: ["Query History", "Every question in this conversation, with the SQL it produced."],
   evals: ["Evaluations", "Does the self-healing loop actually improve accuracy?"],

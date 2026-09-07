@@ -8,6 +8,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.checkpointer import get_checkpointer
+from app.dashboard import build_dashboard
+from app.powerbi import build_export
 from app.db import get_schema_overview, get_stats, init_db
 from app.graph import resume_agent, run_agent
 from app.ratelimit import rate_limit_middleware
@@ -141,6 +143,31 @@ def schema() -> dict:
 def stats() -> dict:
     """Dashboard aggregates. Rate limiter se bahar — koi LLM call nahi hoti."""
     return get_stats()
+
+
+class DashboardRequest(BaseModel):
+    request: str
+    thread_id: str | None = None
+
+
+@api.post("/dashboard")
+def dashboard(request: DashboardRequest) -> dict:
+    """Ek request se poora dashboard — kai sawaal, har ek poore agent se.
+
+    Rate limiter me shaamil hai aur wahan `MAX_WIDGETS` guna mehnga hai: ek
+    dashboard 6-9 LLM calls le sakta hai. Isi wajah se widget cap 4 par hai.
+    """
+    return build_dashboard(request.request, thread_id=request.thread_id)
+
+
+@api.post("/dashboard/export")
+def dashboard_export(dashboard: dict) -> dict:
+    """Generated dashboard ko Power BI artifacts me badalta hai.
+
+    Rate limiter se bahar: yahan koi LLM call nahi hoti, sirf ek dashboard jo
+    client ke paas pehle se hai use reshape kiya jaata hai.
+    """
+    return build_export(dashboard)
 
 
 @api.post("/query", response_model=QueryResponse)

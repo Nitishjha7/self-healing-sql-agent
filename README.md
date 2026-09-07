@@ -50,12 +50,14 @@ Honest snapshot — docs describe what exists, roadmap items are marked as such.
 - ✅ Two-table schema — `departments` + `employees` with a foreign key, so questions require real JOINs
 - ✅ Evaluation harness — 20 questions with gold SQL, execution-accuracy metric, retries-on vs retries-off comparison ([eval/](eval/))
 - ✅ Conversation memory — LangGraph `PostgresSaver` checkpointer, per-`thread_id`, so follow-up questions can refer back ([how it works](#conversation-memory))
-- ✅ Test suite — 46 tests covering memory, approval-gate, output-guard and data-access semantics; no API key or database needed
+- ✅ Test suite — 69 tests covering memory, approval gate, output guard, data access, widget selection and Power BI export; no API key or database needed
 - ✅ Human-in-the-loop approval — destructive statements pause for review instead of being blocked; `ALLOW_WRITES` decides whether an approved statement commits or runs-and-rolls-back ([how it works](docs/TECHNICAL_SPEC.md))
 - ✅ Output validation — deterministic guard that strips schema identifiers and leaked SQL from the answer, reported via `guardrail_flags` ([why not Guardrails AI](docs/CODE_NOTES.md))
 - ✅ React + Vite app — sidebar shell, chat with SQL and result table, live agent-trace rail, and a dashboard of database figures plus the measured eval result
 - ✅ Deployment ready — single-service Docker image (FastAPI serves the API + built SPA on one URL), per-IP rate limiting, `render.yaml`, guide in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
 - ✅ MCP — database access goes through an MCP server over stdio when `USE_MCP=true`, direct driver otherwise ([why both](docs/TECHNICAL_SPEC.md))
+- ✅ AI-generated dashboards — one sentence becomes several self-healed queries, each rendered as the widget its result shape calls for
+- ✅ Power BI export — `.pbids` + Power Query scripts, DirectQuery, no credentials written to the file
 - ⬜ Actually deployed (no live URL yet) — remaining steps are checklisted at the top of [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
 
 ## Project Structure
@@ -195,11 +197,13 @@ See [docs/SETUP.md](docs/SETUP.md) for the git/repo setup steps, and [docs/DEPLO
 
 Near-term priorities are in [docs/ROADMAP.md](docs/ROADMAP.md). Longer term:
 
-- **Phase 2**: Model Context Protocol (MCP) — talk to the database through a Postgres MCP server over stdio instead of a direct driver.
-- **Phase 3**: Human-in-the-Loop (HITL) approval for destructive queries, replacing the current hard block.
-- **Phase 4**: ~~Postgres checkpointer for cross-session memory~~ — ✅ built, see [Conversation memory](#conversation-memory). Multi-tenant isolation (one namespace per user, not just per thread) is still open.
-- **Phase 5 (planned)**: AI-generated dashboards — a "Create a dashboard for X" request runs several self-healing queries, picks a chart type per result set (KPI card, bar, donut, table), and renders them together, alongside the existing single-question chat mode rather than replacing it.
-- **Phase 6 (planned)**: Power BI export — send a generated dashboard's datasets and queries to Power BI so a user can keep customizing and sharing it there.
+**Phases 2, 3 and 4 are built.** What each one actually delivered, and what it did not:
+
+- **Phase 2 — Model Context Protocol** ✅ The database is reachable through an MCP server over stdio (`USE_MCP=true`); `app/data_access.py` picks the transport and the graph never knows which ran. *Still open:* this talks to our own server. The point of the protocol is that the same agent could be pointed at a third-party one without changing — that has not been demonstrated.
+- **Phase 3 — Human-in-the-Loop approval** ✅ A modifying statement pauses the graph and waits for a decision, instead of being blocked outright — see [Human-in-the-loop approval](#human-in-the-loop-approval). *Still open:* the approve endpoint is unauthenticated, exactly like `thread_id`. Anyone holding the thread id can approve a write on it.
+- **Phase 4 — Postgres checkpointer** ✅ Cross-session conversation memory, see [Conversation memory](#conversation-memory). *Still open:* multi-tenant isolation — one namespace per user, not just per thread.
+- **Phase 5 — AI-generated dashboards** ✅ "Create a dashboard showing X" is split into questions, each runs through the same self-healing agent, and the widget for each is picked from the **shape of its result** — not by another model call, because that part is a rule rather than a judgement. Lives beside chat mode rather than replacing it. *Still open:* the plan is one shot; it cannot notice a question came back useless and ask a better one.
+- **Phase 6 — Power BI export** ✅ A generated dashboard exports as a `.pbids` connection file plus one Power Query (M) script per widget, carrying the agent's SQL in DirectQuery mode. *Deliberately an export, not an integration:* publishing to a workspace needs an Azure AD app registration and tenant permissions this project does not have, and a button implying otherwise would be a lie.
 
 ## Positioning
 
