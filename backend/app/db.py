@@ -2,6 +2,8 @@ import os
 
 from sqlalchemy import create_engine, text
 
+from app.seed import DEPARTMENTS, build_employees, build_projects
+
 DATABASE_URL = os.environ.get(
     "DATABASE_URL", "postgresql://agent:agent@localhost:5432/employees"
 )
@@ -21,31 +23,18 @@ CREATE TABLE IF NOT EXISTS employees (
     name TEXT NOT NULL,
     department_id INTEGER NOT NULL REFERENCES departments(id),
     salary INTEGER NOT NULL CHECK (salary > 0),
-    role TEXT NOT NULL
+    role TEXT NOT NULL,
+    hire_date DATE NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS projects (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    department_id INTEGER NOT NULL REFERENCES departments(id),
+    start_date DATE NOT NULL,
+    status TEXT NOT NULL
 );
 """
-
-# (name, budget, location)
-DEPARTMENT_ROWS = [
-    ("Engineering", 2500000, "Bangalore"),
-    ("Marketing", 800000, "Mumbai"),
-    ("HR", 400000, "Delhi"),
-    ("Sales", 1200000, "Pune"),
-]
-
-# (name, department_name, salary, role)
-EMPLOYEE_ROWS = [
-    ("Aarav Sharma", "Engineering", 95000, "Backend Engineer"),
-    ("Priya Verma", "Engineering", 87000, "Frontend Engineer"),
-    ("Rohan Gupta", "Engineering", 120000, "Engineering Manager"),
-    ("Sneha Iyer", "Marketing", 65000, "Marketing Executive"),
-    ("Karan Mehta", "Marketing", 72000, "Marketing Manager"),
-    ("Anjali Nair", "HR", 60000, "HR Executive"),
-    ("Vikram Singh", "HR", 78000, "HR Manager"),
-    ("Neha Kapoor", "Sales", 55000, "Sales Associate"),
-    ("Arjun Reddy", "Sales", 91000, "Sales Manager"),
-    ("Divya Rao", "Engineering", 105000, "DevOps Engineer"),
-]
 
 
 def get_schema_description() -> str:
@@ -59,9 +48,10 @@ def get_schema_description() -> str:
         "Table: departments\n"
         "Columns:\n"
         "  id INTEGER PRIMARY KEY\n"
-        "  name TEXT UNIQUE (values e.g. 'Engineering', 'Marketing', 'HR', 'Sales')\n"
+        "  name TEXT UNIQUE (values: 'Engineering', 'Data Science', 'Product',\n"
+        "       'Design', 'Marketing', 'Sales', 'Customer Success', 'HR')\n"
         "  budget INTEGER (annual department budget)\n"
-        "  location TEXT (city, e.g. 'Bangalore', 'Mumbai', 'Delhi', 'Pune')\n"
+        "  location TEXT (city: 'Bangalore', 'Mumbai', 'Delhi', 'Pune')\n"
         "\n"
         "Table: employees\n"
         "Columns:\n"
@@ -69,11 +59,26 @@ def get_schema_description() -> str:
         "  name TEXT\n"
         "  department_id INTEGER REFERENCES departments(id)\n"
         "  salary INTEGER (annual salary)\n"
-        "  role TEXT (job title, e.g. 'Backend Engineer', 'Sales Manager')\n"
+        "  role TEXT (job title, e.g. 'Backend Engineer', 'Data Scientist',\n"
+        "       'Sales Manager', 'Product Designer')\n"
+        "  hire_date DATE (when the employee joined; use for tenure and hiring trends)\n"
         "\n"
-        "Relationship: employees.department_id -> departments.id\n"
+        "Table: projects\n"
+        "Columns:\n"
+        "  id INTEGER PRIMARY KEY\n"
+        "  name TEXT\n"
+        "  department_id INTEGER REFERENCES departments(id)\n"
+        "  start_date DATE\n"
+        "  status TEXT (values: 'active', 'completed')\n"
+        "\n"
+        "Relationships:\n"
+        "  employees.department_id -> departments.id\n"
+        "  projects.department_id  -> departments.id\n"
+        "\n"
         "The employees table has NO department name column — to filter or display a\n"
-        "department name you MUST join to the departments table.\n"
+        "department name you MUST join to the departments table. To relate employees\n"
+        "to projects, join both through departments.\n"
+        "Today's date is 2026-01-01; use it for any 'how long' or 'this year' question.\n"
     )
 
 
@@ -84,20 +89,41 @@ def _needs_rebuild(conn) -> bool:
     tables drop karke naye shape me rebuild karte hain. Ye demo-appropriate
     hai (data sirf seed hai) — production me Alembic migration hoti.
     """
-    return bool(
-        conn.execute(
-            text(
-                "SELECT 1 FROM information_schema.columns "
-                "WHERE table_name = 'employees' AND column_name = 'department'"
-            )
-        ).scalar()
-    )
+    has_old_column = conn.execute(
+        text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = 'employees' AND column_name = 'department'"
+        )
+    ).scalar()
+    if has_old_column:
+        return True
+
+    # Ek generation aur purana shape: do tables, par bina `hire_date` aur bina
+    # `projects`. Wo bhi rebuild maangta hai, warna naya schema description un
+    # columns ka zikr karta jo table me hain hi nahi — aur agent har date wale
+    # sawaal par fail hota, bina kisi saaf wajah ke.
+    employees_exists = conn.execute(
+        text("SELECT to_regclass('public.employees')")
+    ).scalar()
+    if not employees_exists:
+        return False
+
+    has_hire_date = conn.execute(
+        text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = 'employees' AND column_name = 'hire_date'"
+        )
+    ).scalar()
+    return not has_hire_date
 
 
 def init_db() -> None:
     """Tables banata hai (agar exist nahi karti) aur empty ho toh seed data daalta hai."""
     with engine.begin() as conn:
         if _needs_rebuild(conn):
+            # Order maayne rakhta hai: projects aur employees dono departments ko
+            # reference karte hain, to unhe pehle girana padta hai.
+            conn.execute(text("DROP TABLE IF EXISTS projects"))
             conn.execute(text("DROP TABLE IF EXISTS employees"))
             conn.execute(text("DROP TABLE IF EXISTS departments"))
 
@@ -111,18 +137,19 @@ def init_db() -> None:
                 ),
                 [
                     {"name": n, "budget": b, "location": loc}
-                    for n, b, loc in DEPARTMENT_ROWS
+                    for n, b, loc in DEPARTMENTS
                 ],
             )
 
+        dept_ids = dict(
+            conn.execute(text("SELECT name, id FROM departments")).fetchall()
+        )
+
         if conn.execute(text("SELECT COUNT(*) FROM employees")).scalar() == 0:
-            dept_ids = dict(
-                conn.execute(text("SELECT name, id FROM departments")).fetchall()
-            )
             conn.execute(
                 text(
-                    "INSERT INTO employees (name, department_id, salary, role) "
-                    "VALUES (:name, :department_id, :salary, :role)"
+                    "INSERT INTO employees (name, department_id, salary, role, hire_date) "
+                    "VALUES (:name, :department_id, :salary, :role, :hire_date)"
                 ),
                 [
                     {
@@ -130,8 +157,26 @@ def init_db() -> None:
                         "department_id": dept_ids[d],
                         "salary": s,
                         "role": r,
+                        "hire_date": hd,
                     }
-                    for n, d, s, r in EMPLOYEE_ROWS
+                    for n, d, s, r, hd in build_employees()
+                ],
+            )
+
+        if conn.execute(text("SELECT COUNT(*) FROM projects")).scalar() == 0:
+            conn.execute(
+                text(
+                    "INSERT INTO projects (name, department_id, start_date, status) "
+                    "VALUES (:name, :department_id, :start_date, :status)"
+                ),
+                [
+                    {
+                        "name": n,
+                        "department_id": dept_ids[d],
+                        "start_date": sd,
+                        "status": st,
+                    }
+                    for n, d, sd, st in build_projects()
                 ],
             )
 
@@ -174,8 +219,23 @@ def get_schema_overview() -> dict:
                     "type": "INTEGER",
                     "note": "FK -> departments.id",
                 },
+                {"name": "hire_date", "type": "DATE", "note": "tenure, hiring trends"},
                 {"name": "salary", "type": "INTEGER", "note": "check > 0"},
                 {"name": "role", "type": "TEXT", "note": "job title"},
+            ],
+        },
+        {
+            "name": "projects",
+            "columns": [
+                {"name": "id", "type": "SERIAL", "note": "primary key"},
+                {"name": "name", "type": "TEXT", "note": ""},
+                {
+                    "name": "department_id",
+                    "type": "INTEGER",
+                    "note": "FK -> departments.id",
+                },
+                {"name": "start_date", "type": "DATE", "note": ""},
+                {"name": "status", "type": "TEXT", "note": "active / completed"},
             ],
         },
     ]

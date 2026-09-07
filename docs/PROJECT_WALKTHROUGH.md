@@ -432,6 +432,12 @@ prompt injection se bypass ho hi nahi sakta. Ye layers uski jagah nahi lete.
 Deploy ke baad project complete hai. Poori checklist
 [DEPLOYMENT.md](DEPLOYMENT.md) ke top pe hai.
 
+> **Naye features ki zaroorat nahi hai.** Ab jo bacha hai wo presentation hai, code
+> nahi — deploy, aur eval wali story ratt lena. Is project ki taakat kitni hai aur
+> kahan kamzor hai, uska imaandaar assessment
+> [INTERVIEW_NOTES §16](INTERVIEW_NOTES.md) me hai; aur "koi bhi AI ye bana deta
+> hai" jaise sawaalon ke jawab §10 ke **Credibility** subsection me.
+
 **Iske aage jo ho sakta hai (roadmap, promise nahi):** database-level read-only
 role · approve endpoint pe auth aur per-user thread namespace · bade schema ke liye
 schema retrieval (50 tables ki description prompt me fit nahi hogi) · semantic

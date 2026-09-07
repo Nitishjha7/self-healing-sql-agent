@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.checkpointer import get_checkpointer
+from app.conversations import delete_conversation, get_conversation, list_conversations
 from app.dashboard import build_dashboard
 from app.powerbi import build_export
 from app.db import get_schema_overview, get_stats, init_db
@@ -42,7 +43,7 @@ ALLOWED_ORIGINS = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["Content-Type"],
 )
 
@@ -131,6 +132,29 @@ def _to_response(result: dict, thread_id: str | None) -> QueryResponse:
         row_count=result.get("row_count") or 0,
         memory_active=bool(thread_id and get_checkpointer() is not None),
     )
+
+
+@api.get("/conversations")
+def conversations() -> dict:
+    """Saved conversations, naya pehle. Rate limiter se bahar — koi LLM call nahi."""
+    return {"conversations": list_conversations()}
+
+
+@api.get("/conversations/{thread_id}")
+def conversation(thread_id: str) -> dict:
+    """Ek conversation ke turns — refresh ke baad transcript dobara banane ke liye."""
+    found = get_conversation(thread_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail="No such conversation.")
+    return found
+
+
+@api.delete("/conversations/{thread_id}")
+def remove_conversation(thread_id: str) -> dict:
+    """Ek conversation ke saare checkpoints hata deta hai."""
+    if not delete_conversation(thread_id):
+        raise HTTPException(status_code=500, detail="Could not delete that conversation.")
+    return {"deleted": thread_id}
 
 
 @api.get("/schema")
