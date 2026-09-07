@@ -430,3 +430,41 @@ Synthesis prompt ye bhi kehta hai ki ek se zyada logon ki salary figures na do. 
 `execute_sql` ab rows structured shakl me bhi state me daalta hai (`MAX_RESULT_ROWS = 50` tak), taaki UI table dikha sake. Cap isliye hai ki ye rows **checkpointer me likhi jaati hain** — bina cap ke ek "SELECT * FROM employees" poori table ko har conversation checkpoint me daal deta.
 
 `_serializable()` Postgres ke `Decimal`/`date` ko JSON-safe banata hai. Ye sirf API ke liye nahi: checkpointer bhi inhe serialize karta hai, to ek naya column type API aur memory dono ko ek saath todta.
+
+---
+
+## backend/app/seed.py — realistic data
+
+**Kyun 10 rows kaafi nahi the.** Purana dataset 10 employees aur 4 departments ka tha, aur usse teen cheezein toot rahi thi:
+
+- **Dashboard khaali dikhta tha** — chaar bars ka bar chart chart nahi lagta
+- **Koi date column hi nahi tha**, matlab "hiring trend" jaisa sabse natural dashboard sawaal poochha hi nahi ja sakta tha
+- **Joins do table se aage nahi jaate the** — real Text-to-SQL ki dikkat multi-hop join me hai, aur wahi jagah hai jahan model galtiyan karta hai
+
+Ab: **8 departments, 160 employees, 10 projects**, hire dates 2020-2025 me faili hui, aur ek teesri table (`projects`) jo `departments` se judti hai.
+
+**Random hai, par seeded random hai.** `random.Random(42)` fixed hai, to har machine par bilkul wahi data banta hai. **Ye eval ke liye zaroori hai:** agar seed badalta rehta to accuracy ka har number pichhle run se compare karne layak hi na rehta, aur "self-healing se accuracy badhi" jaisa daawa bemaani ho jaata.
+
+**Salary bands roles se bandhe hain, flat random nahi** — aur manager-level role sirf 10% logon ko milta hai. Isse "average salary" aur "highest paid" alag jawab dete hain; flat random me dono ka jawab shudh sanyog hota.
+
+**Ek comment code se match nahi kar raha tha:** hire-date spread ka multiplier 380 tha, jo ~3 saal deta tha, jabki comment 6 saal kehta tha. Ab 700 hai aur data comment se match karta hai.
+
+---
+
+## backend/app/conversations.py — saved conversations
+
+**Ye ek asli bug theek karta hai, feature nahi jodta.**
+
+Conversation memory Phase 4 me bani aur kaam bhi karti thi — par UI **har page load pe naya `thread_id`** banata tha. Matlab har purani conversation Postgres me padi rehti thi aur pahunch se bahar ho jaati thi. **Data delete nahi ho raha tha, orphan ho raha tha.** Bahar se "refresh pe sab gayab" dikhta tha; andar se ye ek memory feature tha jo apne hi checkpoints kabhi dobara nahi dhoondhta tha.
+
+**Fix do hisson me hai:**
+1. `thread_id` ab `localStorage` me rehta hai (frontend)
+2. `/api/conversations` list deta hai, `/api/conversations/{id}` ek conversation kholta hai, `DELETE` use hata deta hai
+
+**Pehla version galat approach pe tha, aur wo seekhne layak hai.** Maine `checkpoint_blobs` ko seedha SQL se padhne ki koshish ki — aur wo **msgpack** me hai, jsonb me nahi. Use haath se decode karna ek andaruni format ko copy karna hota, jo agli library release me chup-chaap toot jaata. **Checkpointer khud jaanta hai ki usne kya likha tha — usi se poochhna chahiye.** Ab thread list SQL se aati hai (sasta, koi deserialization nahi) aur content `saver.get_tuple()` se.
+
+**Sort `checkpoint->>'ts'` par hai, `thread_id` par nahi** — thread id me timestamp hota to hai, par wo **client banata hai**. Ek alag client alag format bheje to ordering chup-chaap galat ho jaati.
+
+**Delete teeno tables se hota hai** (`checkpoints`, `checkpoint_writes`, `checkpoint_blobs`) — sirf ek saaf karne se orphan rows reh jaati, aur wahi haalat dobara ban jaati jo is file ne theek ki.
+
+**Restored turns alag dikhte hain.** Checkpointed history me sirf question, SQL aur answer hota hai — trace aur rows per-turn state hain aur reset ho jaate hain. Isliye UI "Restored from an earlier session" likhta hai; khaali trace dikhana ye imply karta ki run me koi step tha hi nahi, jabki sach ye hai ki wo rakha nahi gaya.

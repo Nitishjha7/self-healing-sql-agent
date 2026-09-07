@@ -42,12 +42,12 @@ See [docs/TECHNICAL_SPEC.md](docs/TECHNICAL_SPEC.md) for the architecture and st
 
 Honest snapshot — docs describe what exists, roadmap items are marked as such.
 
-- ✅ `backend/app/db.py` — Postgres engine, `departments` + `employees` tables (FK), seed data, `run_sql`
+- ✅ `backend/app/db.py` — Postgres engine; `departments` + `employees` + `projects` (two FKs), 160 seeded employees with hire dates, `run_sql`
 - ✅ `backend/app/graph.py` — full LangGraph self-healing state machine
 - ✅ `backend/app/main.py` — `GET /health`, `POST /api/query`, `POST /api/approve`
 - ✅ Docker Compose (`db` + `backend` + `frontend`)
 - ✅ LangSmith tracing wired (opt-in; set `LANGCHAIN_TRACING_V2=true` + an API key)
-- ✅ Two-table schema — `departments` + `employees` with a foreign key, so questions require real JOINs
+- ✅ Three-table schema with dates — questions need real JOINs, multi-hop joins, and time reasoning ("hiring trend", "tenure")
 - ✅ Evaluation harness — 20 questions with gold SQL, execution-accuracy metric, retries-on vs retries-off comparison ([eval/](eval/))
 - ✅ Conversation memory — LangGraph `PostgresSaver` checkpointer, per-`thread_id`, so follow-up questions can refer back ([how it works](#conversation-memory))
 - ✅ Test suite — 69 tests covering memory, approval gate, output guard, data access, widget selection and Power BI export; no API key or database needed
@@ -58,7 +58,9 @@ Honest snapshot — docs describe what exists, roadmap items are marked as such.
 - ✅ MCP — database access goes through an MCP server over stdio when `USE_MCP=true`, direct driver otherwise ([why both](docs/TECHNICAL_SPEC.md))
 - ✅ AI-generated dashboards — one sentence becomes several self-healed queries, each rendered as the widget its result shape calls for
 - ✅ Power BI export — `.pbids` + Power Query scripts, DirectQuery, no credentials written to the file
+- ✅ Saved conversations — the thread id survives a reload, and the sidebar lists, reopens and deletes past conversations
 - ⬜ Actually deployed (no live URL yet) — remaining steps are checklisted at the top of [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
+- ⬜ Authentication — `thread_id` and the approve endpoint are unauthenticated; anyone holding a thread id can read or approve on it
 
 ## Project Structure
 

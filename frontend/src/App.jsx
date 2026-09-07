@@ -72,6 +72,25 @@ function newThreadId() {
   return `web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/**
+ * The thread id survives a reload.
+ *
+ * It used to be generated fresh on every page load, and that quietly broke the
+ * feature it belonged to: conversations were still being checkpointed in
+ * Postgres, but the UI could never find them again. Nothing was deleted —
+ * everything was orphaned. Persisting the id is what makes the memory feature
+ * visible instead of merely present.
+ */
+function loadThreadId() {
+  try {
+    return localStorage.getItem("threadId") || newThreadId();
+  } catch {
+    // Private windows and blocked site data throw. A fresh id still works for
+    // this session; only the ability to return to it is lost.
+    return newThreadId();
+  }
+}
+
 function greeting() {
   const h = new Date().getHours();
   if (h < 12) return "Good morning";
@@ -83,9 +102,10 @@ export default function App() {
   const [turns, setTurns] = useState([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [threadId, setThreadId] = useState(newThreadId);
+  const [threadId, setThreadId] = useState(loadThreadId);
   const [memoryActive, setMemoryActive] = useState(null);
   const [view, setView] = useState("chat");
+  const [saved, setSaved] = useState([]);
   const [theme, setTheme] = useState(
     () => localStorage.getItem("theme") || "dark"
   );
@@ -105,6 +125,65 @@ export default function App() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [turns, loading]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem("threadId", threadId);
+    } catch {
+      // Same as the theme: the session still works, only the memory of it is lost.
+    }
+  }, [threadId]);
+
+  // On first load, pull the saved conversations and restore whichever thread this
+  // tab was last on. Without this the sidebar can list conversations the user is
+  // unable to reopen, which is the same orphaning problem in a new costume.
+  useEffect(() => {
+    refreshSaved();
+    restore(threadId, { silent: true });
+    // Deliberately once, on mount: `threadId` changes are already handled by the
+    // functions that change it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function refreshSaved() {
+    try {
+      const res = await fetch(`${API_BASE}/api/conversations`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setSaved(data.conversations || []);
+    } catch {
+      // The sidebar list is a convenience. Losing it must not break the app.
+    }
+  }
+
+  /** Rebuild a transcript from checkpointed history. */
+  async function restore(id, { silent = false } = {}) {
+    try {
+      const res = await fetch(`${API_BASE}/api/conversations/${encodeURIComponent(id)}`);
+      if (!res.ok) {
+        if (!silent) setTurns([]);
+        return;
+      }
+      const data = await res.json();
+      // Checkpointed history holds the question, the SQL and the answer — not
+      // the trace or the rows, which are per-turn state and reset each turn.
+      // Restored turns are marked so the UI can say so rather than imply the
+      // trace simply had nothing in it.
+      setTurns(
+        (data.turns || []).map((t) => ({
+          question: t.question,
+          sql_query: t.sql_query,
+          final_answer: t.answer,
+          restored: true,
+        }))
+      );
+      setThreadId(id);
+      setMemoryActive(true);
+      setView("chat");
+    } catch {
+      if (!silent) setTurns([]);
+    }
+  }
+
   // A new thread id is all it takes to start over: the old conversation stays
   // checkpointed under its own key, this one simply has no history yet.
   function newConversation() {
@@ -114,6 +193,19 @@ export default function App() {
     setMemoryActive(null);
     setThreadId(newThreadId());
     setView("chat");
+    refreshSaved();
+  }
+
+  async function removeConversation(id) {
+    try {
+      await fetch(`${API_BASE}/api/conversations/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      });
+    } catch {
+      // Ignore: the refresh below shows whether it actually went.
+    }
+    if (id === threadId) newConversation();
+    else refreshSaved();
   }
 
   async function ask(question) {
@@ -148,6 +240,9 @@ export default function App() {
       // only discovers when a follow-up goes wrong.
       setMemoryActive(Boolean(data.memory_active));
       applyToLastTurn({ ...data, elapsed: (performance.now() - started) / 1000 });
+      // The first answer in a thread is what makes it appear in the list, so the
+      // sidebar has to refresh after a turn completes, not before.
+      refreshSaved();
     } catch (err) {
       applyToLastTurn({ failed: String(err.message || err) });
     } finally {
@@ -212,7 +307,10 @@ export default function App() {
         onNew={newConversation}
         busy={loading}
         memoryActive={memoryActive}
-        turns={turns}
+        saved={saved}
+        activeThread={threadId}
+        onOpen={restore}
+        onDelete={removeConversation}
       />
 
       <div className="main">
@@ -273,9 +371,17 @@ export default function App() {
 
 /* ---------------------------------------------------------------- sidebar */
 
-function Sidebar({ view, onView, onNew, busy, memoryActive, turns }) {
-  const questions = turns.map((t) => t.question);
-
+function Sidebar({
+  view,
+  onView,
+  onNew,
+  busy,
+  memoryActive,
+  saved,
+  activeThread,
+  onOpen,
+  onDelete,
+}) {
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -308,22 +414,37 @@ function Sidebar({ view, onView, onNew, busy, memoryActive, turns }) {
 
       <div className="side-section">
         <div className="side-head">
-          <p className="side-title">Conversation</p>
+          <p className="side-title">Conversations</p>
           <button className="icon-btn tiny" onClick={onNew} disabled={busy}>
             <IconPlus size={13} />
           </button>
         </div>
 
-        {questions.length === 0 ? (
+        {saved.length === 0 ? (
           <p className="side-empty">
-            Nothing yet — your questions appear here as you ask them.
+            Nothing saved yet. Ask a question and this conversation appears here —
+            and stays after a reload.
           </p>
         ) : (
           <ul className="side-list">
-            {questions.map((q, i) => (
-              <li key={i} title={q} className={i === questions.length - 1 ? "on" : ""}>
-                <IconChat size={13} />
-                <span>{q}</span>
+            {saved.map((c) => (
+              <li
+                key={c.thread_id}
+                title={c.title}
+                className={c.thread_id === activeThread ? "on" : ""}
+              >
+                <button className="side-open" onClick={() => onOpen(c.thread_id)}>
+                  <IconChat size={13} />
+                  <span>{c.title}</span>
+                  <em>{c.turns}</em>
+                </button>
+                <button
+                  className="side-del"
+                  title="Delete this conversation"
+                  onClick={() => onDelete(c.thread_id)}
+                >
+                  ×
+                </button>
               </li>
             ))}
           </ul>
@@ -542,19 +663,30 @@ function Turn({ turn, pending, onDecide, busy }) {
             <div className="bubble agent">
               <div className="answer">{turn.final_answer}</div>
               <div className="status-strip">
-                <span className="ok">
-                  <IconCheck size={13} /> Query executed successfully
-                </span>
-                {retries > 0 ? (
-                  <span className="warn">
-                    <IconRefresh size={13} /> Recovered after {retries}{" "}
-                    {retries === 1 ? "retry" : "retries"}
+                {/* A restored turn carries the question, SQL and answer — the
+                    trace and rows are per-turn state and were reset. Showing an
+                    empty trace would imply the run had no steps, rather than
+                    that they were not kept. */}
+                {turn.restored ? (
+                  <span className="muted-note">
+                    <IconClock size={13} /> Restored from an earlier session
                   </span>
                 ) : (
-                  <span className="muted-note">
-                    <IconRefresh size={13} /> No retries needed
+                  <span className="ok">
+                    <IconCheck size={13} /> Query executed successfully
                   </span>
                 )}
+                {!turn.restored &&
+                  (retries > 0 ? (
+                    <span className="warn">
+                      <IconRefresh size={13} /> Recovered after {retries}{" "}
+                      {retries === 1 ? "retry" : "retries"}
+                    </span>
+                  ) : (
+                    <span className="muted-note">
+                      <IconRefresh size={13} /> No retries needed
+                    </span>
+                  ))}
                 {turn.elapsed != null && (
                   <span className="muted-note">
                     <IconClock size={13} /> {turn.elapsed.toFixed(2)}s
