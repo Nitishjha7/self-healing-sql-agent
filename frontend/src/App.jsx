@@ -3,6 +3,27 @@ import "./App.css";
 import "./Shell.css";
 import Dashboard from "./Dashboard.jsx";
 import TracePanel from "./TracePanel.jsx";
+import SqlBlock from "./SqlBlock.jsx";
+import { SchemaView, HistoryView, EvalView, SettingsView } from "./Views.jsx";
+import {
+  IconActivity,
+  IconBrain,
+  IconChart,
+  IconChat,
+  IconCheck,
+  IconClock,
+  IconCopy,
+  IconDatabase,
+  IconGrid,
+  IconMoon,
+  IconPlus,
+  IconRefresh,
+  IconSend,
+  IconSettings,
+  IconShield,
+  IconSun,
+  IconTable,
+} from "./Icons.jsx";
 
 // Empty by default: both the docker-compose/nginx setup and the single-service
 // deploy image serve this app on the same origin as the API. Only a split
@@ -25,11 +46,35 @@ const FOLLOW_UPS = [
   "Who is the highest paid among them?",
 ];
 
+const NAV = [
+  { id: "chat", label: "Chat", Icon: IconChat },
+  { id: "dashboard", label: "Dashboard", Icon: IconGrid },
+  { id: "schema", label: "Schema Explorer", Icon: IconTable },
+  { id: "history", label: "Query History", Icon: IconClock },
+  { id: "evals", label: "Evaluations", Icon: IconChart, badge: "20" },
+  { id: "settings", label: "Settings", Icon: IconSettings },
+];
+
+const FEATURES = [
+  { Icon: IconRefresh, title: "Self-healing", sub: "Up to 3 automatic retries" },
+  { Icon: IconShield, title: "Safe by design", sub: "Writes need your approval" },
+  { Icon: IconBrain, title: "Conversation memory", sub: "Context across questions" },
+  { Icon: IconCheck, title: "Validation layer", sub: "Guards the final answer" },
+  { Icon: IconActivity, title: "Observability", sub: "LangSmith tracing ready" },
+];
+
 // The conversation id is generated client-side and kept for the tab's lifetime.
 // Server-generated ids would mean cookies or session state; this API is
 // deliberately stateless apart from what the checkpointer stores under this key.
 function newThreadId() {
   return `web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function greeting() {
+  const h = new Date().getHours();
+  if (h < 12) return "Good morning";
+  if (h < 17) return "Good afternoon";
+  return "Good evening";
 }
 
 export default function App() {
@@ -39,7 +84,24 @@ export default function App() {
   const [threadId, setThreadId] = useState(newThreadId);
   const [memoryActive, setMemoryActive] = useState(null);
   const [view, setView] = useState("chat");
+  const [theme, setTheme] = useState(
+    () => localStorage.getItem("theme") || "dark"
+  );
   const bottomRef = useRef(null);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try {
+      localStorage.setItem("theme", theme);
+    } catch {
+      // Private windows and blocked site data throw here. The theme still
+      // applies for this session; only the memory of it is lost.
+    }
+  }, [theme]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [turns, loading]);
 
   // A new thread id is all it takes to start over: the old conversation stays
   // checkpointed under its own key, this one simply has no history yet.
@@ -49,11 +111,8 @@ export default function App() {
     setInput("");
     setMemoryActive(null);
     setThreadId(newThreadId());
+    setView("chat");
   }
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [turns, loading]);
 
   async function ask(question) {
     const trimmed = question.trim();
@@ -61,7 +120,9 @@ export default function App() {
 
     setInput("");
     setLoading(true);
-    setTurns((prev) => [...prev, { question: trimmed }]);
+    setView("chat");
+    setTurns((prev) => [...prev, { question: trimmed, at: Date.now() }]);
+    const started = performance.now();
 
     try {
       const res = await fetch(`${API_BASE}/api/query`, {
@@ -84,20 +145,9 @@ export default function App() {
       // stateless. Showing "memory on" in that case would be a lie the user
       // only discovers when a follow-up goes wrong.
       setMemoryActive(Boolean(data.memory_active));
-      setTurns((prev) => {
-        const next = [...prev];
-        next[next.length - 1] = { ...next[next.length - 1], ...data };
-        return next;
-      });
+      applyToLastTurn({ ...data, elapsed: (performance.now() - started) / 1000 });
     } catch (err) {
-      setTurns((prev) => {
-        const next = [...prev];
-        next[next.length - 1] = {
-          ...next[next.length - 1],
-          failed: String(err.message || err),
-        };
-        return next;
-      });
+      applyToLastTurn({ failed: String(err.message || err) });
     } finally {
       setLoading(false);
     }
@@ -106,6 +156,7 @@ export default function App() {
   async function decide(approved) {
     if (loading) return;
     setLoading(true);
+    const started = performance.now();
 
     try {
       const res = await fetch(`${API_BASE}/api/approve`, {
@@ -115,20 +166,13 @@ export default function App() {
       });
 
       if (res.status === 409) {
-        // Already decided — a double click, or a stale tab. Not an error worth
-        // alarming the user about, but the pending card has to go: leaving it up
-        // implies a decision is still outstanding when it is not.
-        setTurns((prev) => {
-          const next = [...prev];
-          const last = next[next.length - 1];
-          next[next.length - 1] = {
-            ...last,
-            awaiting_approval: false,
-            final_answer:
-              last.final_answer ||
-              "This request was already decided elsewhere. Nothing further ran.",
-          };
-          return next;
+        // Already decided — a double click, or a stale tab. Not alarming, but
+        // the pending card has to go: leaving it up implies a decision is still
+        // outstanding when it is not.
+        applyToLastTurn({
+          awaiting_approval: false,
+          final_answer:
+            "This request was already decided elsewhere. Nothing further ran.",
         });
         return;
       }
@@ -139,27 +183,24 @@ export default function App() {
       if (!res.ok) throw new Error(`Backend returned ${res.status}`);
 
       const data = await res.json();
-      setTurns((prev) => {
-        const next = [...prev];
-        next[next.length - 1] = { ...next[next.length - 1], ...data };
-        return next;
-      });
+      applyToLastTurn({ ...data, elapsed: (performance.now() - started) / 1000 });
     } catch (err) {
-      setTurns((prev) => {
-        const next = [...prev];
-        next[next.length - 1] = {
-          ...next[next.length - 1],
-          failed: String(err.message || err),
-        };
-        return next;
-      });
+      applyToLastTurn({ failed: String(err.message || err) });
     } finally {
       setLoading(false);
     }
   }
 
+  function applyToLastTurn(patch) {
+    setTurns((prev) => {
+      const next = [...prev];
+      next[next.length - 1] = { ...next[next.length - 1], ...patch };
+      return next;
+    });
+  }
 
   const lastTurn = turns[turns.length - 1] || null;
+  const showTrace = view === "chat";
 
   return (
     <div className="shell">
@@ -169,199 +210,277 @@ export default function App() {
         onNew={newConversation}
         busy={loading}
         memoryActive={memoryActive}
-        questions={turns.map((t) => t.question)}
+        turns={turns}
       />
 
       <div className="main">
-        <header className="topbar">
-          <div>
-            <h1>
-              {view === "chat" ? "Ask your database" : "Overview"}
-            </h1>
-            <p className="sub">
-              {view === "chat"
-                ? "Plain English in, SQL out. If the query fails, the agent reads the database error and rewrites it."
-                : "Live figures from the database, and the measured result for the self-healing loop."}
-            </p>
-          </div>
-          <div className="header-actions">
-            {memoryActive !== null && (
-              <span
-                className={`pill ${memoryActive ? "ok" : "warn"}`}
-                title={
-                  memoryActive
-                    ? "Conversation is checkpointed in Postgres — follow-ups can refer back."
-                    : "The checkpointer is not available, so each question is answered on its own."
-                }
-              >
-                <i className="dot" /> Memory {memoryActive ? "on" : "off"}
-              </span>
+        <TopBar
+          view={view}
+          theme={theme}
+          onTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
+          onNew={newConversation}
+          busy={loading}
+        />
+
+        <div className={`workspace ${showTrace ? "" : "full"}`}>
+          <div className="content-col">
+            {view === "chat" && (
+              <ChatView
+                turns={turns}
+                loading={loading}
+                memoryActive={memoryActive}
+                onAsk={ask}
+                onDecide={decide}
+                bottomRef={bottomRef}
+              />
             )}
-            <span className="pill muted">PostgreSQL 16</span>
+            {view === "dashboard" && <Dashboard apiBase={API_BASE} />}
+            {view === "schema" && <SchemaView apiBase={API_BASE} />}
+            {view === "history" && <HistoryView turns={turns} onAsk={ask} />}
+            {view === "evals" && <EvalView />}
+            {view === "settings" && (
+              <SettingsView
+                theme={theme}
+                onTheme={setTheme}
+                memoryActive={memoryActive}
+                threadId={threadId}
+              />
+            )}
+
+            {view === "chat" && (
+              <Composer
+                input={input}
+                setInput={setInput}
+                onSubmit={() => ask(input)}
+                loading={loading}
+              />
+            )}
           </div>
-        </header>
 
-        {view === "dashboard" ? (
-          <Dashboard apiBase={API_BASE} />
-        ) : (
-          <div className="workspace">
-            <div className="chat-col">
-              <main className="chat">
-                {turns.length === 0 && !loading && (
-                  <div className="empty">
-                    <p className="empty-title">Try one of these</p>
-                    <div className="chips">
-                      {EXAMPLES.map((q) => (
-                        <button key={q} className="chip" onClick={() => ask(q)}>
-                          {q}
-                        </button>
-                      ))}
-                    </div>
-                    <p className="empty-hint">
-                      The last one is there on purpose: anything that would modify
-                      data stops and asks you to approve the exact statement first.
-                    </p>
-                  </div>
-                )}
+          {showTrace && <TracePanel turn={lastTurn} pending={loading} />}
+        </div>
 
-                {turns.map((turn, i) => (
-                  <Turn
-                    key={i}
-                    turn={turn}
-                    pending={loading && i === turns.length - 1}
-                    onDecide={i === turns.length - 1 ? decide : null}
-                    busy={loading}
-                  />
-                ))}
-
-                {/* Only offered once an answer exists to refer back to, and only
-                    when memory is actually on — suggesting "how many work there?"
-                    with the checkpointer down sets the user up to watch it fail. */}
-                {memoryActive && !loading && turns.some((t) => t.final_answer) && (
-                  <div className="chips follow-ups">
-                    {FOLLOW_UPS.map((q) => (
-                      <button key={q} className="chip" onClick={() => ask(q)}>
-                        {q}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                <div ref={bottomRef} />
-              </main>
-
-              <form
-                className="composer"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  ask(input);
-                }}
-              >
-                <input
-                  className="input"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder="Ask about employees, departments, salaries…"
-                  disabled={loading}
-                  autoFocus
-                />
-                <button
-                  className="send"
-                  type="submit"
-                  disabled={loading || !input.trim()}
-                >
-                  {loading ? "Thinking…" : "Ask"}
-                </button>
-              </form>
-            </div>
-
-            <TracePanel turn={lastTurn} pending={loading} />
-          </div>
-        )}
+        <FeatureStrip />
       </div>
     </div>
   );
 }
 
-function Sidebar({ view, onView, onNew, busy, memoryActive, questions }) {
+/* ---------------------------------------------------------------- sidebar */
+
+function Sidebar({ view, onView, onNew, busy, memoryActive, turns }) {
+  const questions = turns.map((t) => t.question);
+
   return (
     <aside className="sidebar">
       <div className="brand">
-        <span className="brand-mark">⌘</span>
+        <span className="brand-mark">
+          <IconDatabase size={18} />
+        </span>
         <div>
           <strong>SQL Copilot</strong>
-          <small>Self-healing data query agent</small>
+          <small>Self-Healing Data Query Agent</small>
         </div>
       </div>
 
       <button className="new-query" onClick={onNew} disabled={busy}>
-        + New conversation
+        <IconPlus size={15} /> New Query
       </button>
 
       <nav className="nav">
-        <button
-          className={`nav-item ${view === "chat" ? "active" : ""}`}
-          onClick={() => onView("chat")}
-        >
-          Chat
-        </button>
-        <button
-          className={`nav-item ${view === "dashboard" ? "active" : ""}`}
-          onClick={() => onView("dashboard")}
-        >
-          Dashboard
-        </button>
+        {NAV.map(({ id, label, Icon, badge }) => (
+          <button
+            key={id}
+            className={`nav-item ${view === id ? "active" : ""}`}
+            onClick={() => onView(id)}
+          >
+            <Icon size={15} />
+            <span>{label}</span>
+            {badge && <span className="nav-badge">{badge}</span>}
+          </button>
+        ))}
       </nav>
 
-      {questions.length > 0 && (
-        <div className="side-section">
-          <p className="side-title">This conversation</p>
+      <div className="side-section">
+        <div className="side-head">
+          <p className="side-title">Conversation</p>
+          <button className="icon-btn tiny" onClick={onNew} disabled={busy}>
+            <IconPlus size={13} />
+          </button>
+        </div>
+
+        {questions.length === 0 ? (
+          <p className="side-empty">
+            Nothing yet — your questions appear here as you ask them.
+          </p>
+        ) : (
           <ul className="side-list">
             {questions.map((q, i) => (
-              <li key={i} title={q}>
-                {q}
+              <li key={i} title={q} className={i === questions.length - 1 ? "on" : ""}>
+                <IconChat size={13} />
+                <span>{q}</span>
               </li>
             ))}
           </ul>
-        </div>
-      )}
+        )}
+      </div>
 
       <div className="side-card">
         <div className="side-card-head">
-          <strong>Conversation memory</strong>
-          <span className={`pill small ${memoryActive ? "ok" : "muted"}`}>
-            {memoryActive === null ? "idle" : memoryActive ? "active" : "off"}
+          <strong>Conversation Memory</strong>
+          <span className={`chip ${memoryActive ? "ok" : "muted"}`}>
+            {memoryActive === null ? "Idle" : memoryActive ? "Active" : "Off"}
           </span>
         </div>
-        <p>
-          Checkpointed in Postgres, so follow-up questions can refer back to
-          earlier answers — and survive a restart.
-        </p>
+        <div className="side-card-body">
+          <p>
+            Follow-up questions refer back to earlier answers, checkpointed in
+            Postgres so they survive a restart.
+          </p>
+          <IconBrain size={22} />
+        </div>
       </div>
     </aside>
   );
 }
+
+/* ----------------------------------------------------------------- topbar */
+
+const TITLES = {
+  chat: null,
+  dashboard: ["Overview", "Live figures from the database, and the measured evaluation result."],
+  schema: ["Schema Explorer", "Exactly what the agent is told about your database — nothing more."],
+  history: ["Query History", "Every question in this conversation, with the SQL it produced."],
+  evals: ["Evaluations", "Does the self-healing loop actually improve accuracy?"],
+  settings: ["Settings", "Appearance, and what this session is currently doing."],
+};
+
+function TopBar({ view, theme, onTheme, onNew, busy }) {
+  const t = TITLES[view];
+
+  return (
+    <header className="topbar">
+      <div>
+        {t ? (
+          <>
+            <h1>{t[0]}</h1>
+            <p className="sub">{t[1]}</p>
+          </>
+        ) : (
+          <>
+            <h1>
+              {greeting()}, Nitish <span className="wave">👋</span>
+            </h1>
+            <p className="sub">Ask anything about your database in natural language.</p>
+          </>
+        )}
+      </div>
+
+      <div className="topbar-actions">
+        <span className="pill ok">
+          <i className="dot" /> Connected
+        </span>
+        <span className="pill">
+          <IconDatabase size={13} /> PostgreSQL 16
+        </span>
+        <button
+          className="icon-btn"
+          onClick={onTheme}
+          title={theme === "dark" ? "Switch to light" : "Switch to dark"}
+        >
+          {theme === "dark" ? <IconSun size={15} /> : <IconMoon size={15} />}
+        </button>
+        <button className="new-query compact" onClick={onNew} disabled={busy}>
+          <IconPlus size={14} /> New Query
+        </button>
+      </div>
+    </header>
+  );
+}
+
+/* ------------------------------------------------------------------- chat */
+
+function ChatView({ turns, loading, memoryActive, onAsk, onDecide, bottomRef }) {
+  return (
+    <main className="chat">
+      {turns.length === 0 && !loading && (
+        <div className="empty">
+          <p className="empty-title">Try one of these</p>
+          <div className="chips">
+            {EXAMPLES.map((q) => (
+              <button key={q} className="chip" onClick={() => onAsk(q)}>
+                {q}
+              </button>
+            ))}
+          </div>
+          <p className="empty-hint">
+            The last one is there on purpose: anything that would modify data
+            stops and asks you to approve the exact statement first.
+          </p>
+        </div>
+      )}
+
+      {turns.map((turn, i) => (
+        <Turn
+          key={i}
+          turn={turn}
+          pending={loading && i === turns.length - 1}
+          onDecide={i === turns.length - 1 ? onDecide : null}
+          busy={loading}
+        />
+      ))}
+
+      {/* Only offered once an answer exists to refer back to, and only when
+          memory is actually on — suggesting "how many work there?" with the
+          checkpointer down sets the user up to watch it fail. */}
+      {memoryActive && !loading && turns.some((t) => t.final_answer) && (
+        <div className="chips follow-ups">
+          {FOLLOW_UPS.map((q) => (
+            <button key={q} className="chip" onClick={() => onAsk(q)}>
+              {q}
+            </button>
+          ))}
+        </div>
+      )}
+      <div ref={bottomRef} />
+    </main>
+  );
+}
+
 function Turn({ turn, pending, onDecide, busy }) {
-  const [open, setOpen] = useState(false);
   const retries = turn.retry_count ?? 0;
 
   return (
     <div className="turn">
-      <div className="bubble user">{turn.question}</div>
+      <div className="row user-row">
+        <div className="bubble user">{turn.question}</div>
+        <span className="avatar user-avatar">N</span>
+      </div>
 
       {pending && (
-        <div className="bubble agent pending">
-          <span className="dots">
-            <i />
-            <i />
-            <i />
+        <div className="row">
+          <span className="avatar bot">
+            <IconDatabase size={15} />
           </span>
-          Generating SQL and running it…
+          <div className="bubble agent pending">
+            <span className="dots">
+              <i />
+              <i />
+              <i />
+            </span>
+            Generating SQL and running it…
+          </div>
         </div>
       )}
 
       {turn.failed && (
-        <div className="bubble agent error">
-          Couldn&apos;t reach the agent: {turn.failed}
+        <div className="row">
+          <span className="avatar bot">
+            <IconDatabase size={15} />
+          </span>
+          <div className="bubble agent error">
+            Couldn&apos;t reach the agent: {turn.failed}
+          </div>
         </div>
       )}
 
@@ -369,87 +488,86 @@ function Turn({ turn, pending, onDecide, busy }) {
           someone to approve a statement they cannot read is not an approval,
           it is a rubber stamp with extra steps. */}
       {turn.awaiting_approval && !pending && (
-        <div className="bubble agent approval">
-          <div className="approval-head">
-            <span className="badge stop">Approval required</span>
-            <span className="approval-note">
-              This would modify data, so the agent paused before running it.
-            </span>
-          </div>
-
-          <pre className="sql">{turn.sql_query}</pre>
-
-          {onDecide ? (
-            <div className="approval-actions">
-              <button
-                className="btn danger"
-                disabled={busy}
-                onClick={() => onDecide(true)}
-              >
-                Approve &amp; run
-              </button>
-              <button
-                className="btn"
-                disabled={busy}
-                onClick={() => onDecide(false)}
-              >
-                Reject
-              </button>
+        <div className="row">
+          <span className="avatar bot warn">
+            <IconShield size={15} />
+          </span>
+          <div className="bubble agent approval">
+            <div className="approval-head">
+              <span className="chip warn">Approval required</span>
+              <span className="approval-note">
+                This would modify data, so the agent paused before running it.
+              </span>
             </div>
-          ) : (
-            <p className="approval-note">
-              Superseded by a later question — this one was never run.
-            </p>
-          )}
+
+            <SqlBlock sql={turn.sql_query} title="Statement awaiting approval" />
+
+            {onDecide ? (
+              <div className="approval-actions">
+                <button
+                  className="btn danger"
+                  disabled={busy}
+                  onClick={() => onDecide(true)}
+                >
+                  Approve &amp; run
+                </button>
+                <button className="btn" disabled={busy} onClick={() => onDecide(false)}>
+                  Reject
+                </button>
+              </div>
+            ) : (
+              <p className="approval-note">
+                Superseded by a later question — this one was never run.
+              </p>
+            )}
+          </div>
         </div>
       )}
 
       {turn.final_answer && (
-        <>
-          <div className="bubble agent">
-            <div className="answer">{turn.final_answer}</div>
-            <div className="meta">
-              <Badge retries={retries} />
-              {turn.guardrail_flags?.length > 0 && (
-                <span className="badge warn" title={turn.guardrail_flags.join(", ")}>
-                  Output guard rewrote this
+        <div className="row">
+          <span className="avatar bot">
+            <IconDatabase size={15} />
+          </span>
+          <div className="answer-stack">
+            <div className="bubble agent">
+              <div className="answer">{turn.final_answer}</div>
+              <div className="status-strip">
+                <span className="ok">
+                  <IconCheck size={13} /> Query executed successfully
                 </span>
-              )}
-            </div>
-          </div>
-
-          {turn.sql_query && (
-            <div className="card">
-              <div className="card-head">
-                <span className="card-title">SQL</span>
-                <CopyButton text={turn.sql_query} />
+                {retries > 0 ? (
+                  <span className="warn">
+                    <IconRefresh size={13} /> Recovered after {retries}{" "}
+                    {retries === 1 ? "retry" : "retries"}
+                  </span>
+                ) : (
+                  <span className="muted-note">
+                    <IconRefresh size={13} /> No retries needed
+                  </span>
+                )}
+                {turn.elapsed != null && (
+                  <span className="muted-note">
+                    <IconClock size={13} /> {turn.elapsed.toFixed(2)}s
+                  </span>
+                )}
+                {turn.guardrail_flags?.length > 0 && (
+                  <span className="warn" title={turn.guardrail_flags.join(", ")}>
+                    <IconShield size={13} /> Output guard rewrote this
+                  </span>
+                )}
               </div>
-              <pre className="sql">{turn.sql_query}</pre>
             </div>
-          )}
 
-          {turn.result_rows?.length > 0 && (
-            <ResultTable rows={turn.result_rows} total={turn.row_count} />
-          )}
+            {turn.sql_query && !turn.awaiting_approval && (
+              <SqlBlock sql={turn.sql_query} />
+            )}
 
-          {/* The full trace lives in the side panel; this stays as a fallback
-              for narrow screens, where that panel is not on screen at all. */}
-          <button
-            className="toggle inline-toggle"
-            onClick={() => setOpen((o) => !o)}
-          >
-            {open ? "Hide" : "Show"} execution trace
-          </button>
-          {open && (
-            <ol className="logs boxed">
-              {(turn.logs || []).map((line, i) => (
-                <li key={i} className={logClass(line)}>
-                  {line}
-                </li>
-              ))}
-            </ol>
-          )}
-        </>
+            {turn.result_rows?.length > 0 && (
+              <ResultTable rows={turn.result_rows} total={turn.row_count} />
+            )}
+          </div>
+        </div>
       )}
     </div>
   );
@@ -459,13 +577,33 @@ function ResultTable({ rows, total }) {
   const columns = Object.keys(rows[0]);
   const capped = total > rows.length;
 
+  function download() {
+    // A CSV built in the browser from data already on screen: no round trip,
+    // and nothing here the user cannot already see.
+    const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const csv = [
+      columns.join(","),
+      ...rows.map((r) => columns.map((c) => esc(r[c])).join(",")),
+    ].join("\n");
+
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "query-result.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="card">
       <div className="card-head">
         <span className="card-title">
-          Result · {total} {total === 1 ? "row" : "rows"}
-          {capped && <span className="muted-note"> (showing first {rows.length})</span>}
+          <IconTable size={14} /> Query Result ({total} {total === 1 ? "row" : "rows"}
+          {capped && `, showing ${rows.length}`})
         </span>
+        <button className="ghost-btn" onClick={download}>
+          <IconCopy size={13} /> CSV
+        </button>
       </div>
       <div className="table-wrap">
         <table className="result">
@@ -491,45 +629,51 @@ function ResultTable({ rows, total }) {
   );
 }
 
-function CopyButton({ text }) {
-  const [done, setDone] = useState(false);
+/* --------------------------------------------------------------- composer */
+
+function Composer({ input, setInput, onSubmit, loading }) {
   return (
-    <button
-      className="toggle"
-      onClick={() => {
-        // Clipboard access can be denied (insecure origin, permissions). Failing
-        // silently would leave the button claiming success it did not have.
-        navigator.clipboard
-          ?.writeText(text)
-          .then(() => {
-            setDone(true);
-            setTimeout(() => setDone(false), 1500);
-          })
-          .catch(() => {});
+    <form
+      className="composer"
+      onSubmit={(e) => {
+        e.preventDefault();
+        onSubmit();
       }}
     >
-      {done ? "Copied" : "Copy"}
-    </button>
+      <div className="composer-box">
+        <input
+          className="input"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="Ask a follow-up question…"
+          disabled={loading}
+          autoFocus
+        />
+        <button className="send" type="submit" disabled={loading || !input.trim()}>
+          <IconSend size={16} />
+        </button>
+      </div>
+      <p className="composer-hint">Press Enter to send</p>
+    </form>
   );
 }
 
-function Badge({ retries }) {
-  if (retries === 0) {
-    return <span className="badge ok">First try</span>;
-  }
+/* ---------------------------------------------------------------- footer */
+
+function FeatureStrip() {
   return (
-    <span className="badge warn">
-      Self-healed after {retries} {retries === 1 ? "retry" : "retries"}
-    </span>
+    <footer className="feature-strip">
+      {FEATURES.map(({ Icon, title, sub }) => (
+        <div className="feature" key={title}>
+          <span className="feature-icon">
+            <Icon size={14} />
+          </span>
+          <div>
+            <strong>{title}</strong>
+            <small>{sub}</small>
+          </div>
+        </div>
+      ))}
+    </footer>
   );
-}
-
-// The trace is the point of this UI, so failures and repairs are colour-coded
-// rather than rendered as an undifferentiated wall of log lines.
-function logClass(line) {
-  const l = line.toLowerCase();
-  if (l.startsWith("execution failed") || l.startsWith("blocked")) return "log-err";
-  if (l.startsWith("retry")) return "log-warn";
-  if (l.startsWith("execution succeeded")) return "log-ok";
-  return "";
 }

@@ -145,6 +145,51 @@ def run_sql(query: str):
         return rows
 
 
+def get_schema_overview() -> dict:
+    """Schema Explorer ke liye: columns, row counts, aur wahi text jo model ko jaata hai.
+
+    Row counts live query se aate hain, columns hand-written list se. Ye jaan-boojh
+    ke hai: is view ka poora point ye dikhana hai ki **model ko kya bataya jaata
+    hai**, aur wo description bhi hand-written hai. `information_schema` se
+    generate karne pe view aur prompt alag ho jaate, aur tab ye page kuch aur
+    dikhata jo agent dekhta hi nahi.
+    """
+    tables = [
+        {
+            "name": "departments",
+            "columns": [
+                {"name": "id", "type": "SERIAL", "note": "primary key"},
+                {"name": "name", "type": "TEXT", "note": "unique"},
+                {"name": "budget", "type": "INTEGER", "note": "check > 0"},
+                {"name": "location", "type": "TEXT", "note": "city"},
+            ],
+        },
+        {
+            "name": "employees",
+            "columns": [
+                {"name": "id", "type": "SERIAL", "note": "primary key"},
+                {"name": "name", "type": "TEXT", "note": ""},
+                {
+                    "name": "department_id",
+                    "type": "INTEGER",
+                    "note": "FK -> departments.id",
+                },
+                {"name": "salary", "type": "INTEGER", "note": "check > 0"},
+                {"name": "role", "type": "TEXT", "note": "job title"},
+            ],
+        },
+    ]
+
+    with engine.connect() as conn:
+        for table in tables:
+            count = conn.execute(
+                text(f"SELECT COUNT(*) FROM {table['name']}")  # noqa: S608 — fixed names
+            ).scalar()
+            table["rows"] = int(count)
+
+    return {"tables": tables, "description": get_schema_description()}
+
+
 def get_stats() -> dict:
     """Dashboard ke liye aggregates.
 

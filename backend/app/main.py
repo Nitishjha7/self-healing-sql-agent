@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.checkpointer import get_checkpointer
-from app.db import get_stats, init_db
+from app.db import get_schema_overview, get_stats, init_db
 from app.graph import resume_agent, run_agent
 from app.ratelimit import rate_limit_middleware
 
@@ -120,6 +120,12 @@ def _to_response(result: dict, thread_id: str | None) -> QueryResponse:
         row_count=result.get("row_count") or 0,
         memory_active=bool(thread_id and get_checkpointer() is not None),
     )
+
+
+@api.get("/schema")
+def schema() -> dict:
+    """Schema Explorer: columns, row counts, aur wahi text jo model ko jaata hai."""
+    return get_schema_overview()
 
 
 @api.get("/stats")

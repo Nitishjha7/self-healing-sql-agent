@@ -149,4 +149,78 @@ export function EvalChart({ runs }) {
   );
 }
 
+/**
+ * Headcount split as a donut.
+ *
+ * A donut is defensible here and rarely elsewhere: four categories, parts of a
+ * known whole, and the question is "roughly what share" rather than "which is
+ * bigger by how much" — the comparison a bar answers better. Every slice is
+ * direct-labelled in the legend with both its count and its percentage, so the
+ * reading never depends on judging arc lengths, and identity never rests on
+ * colour alone.
+ */
+export function DonutChart({ data }) {
+  const total = data.reduce((s, d) => s + d.value, 0) || 1;
+  const R = 62;
+  const STROKE = 26;
+  const C = 2 * Math.PI * R;
+
+  let offset = 0;
+
+  return (
+    <div className="chart donut-wrap">
+      <svg width="150" height="150" viewBox="0 0 150 150" role="img">
+        <title>Employees by department</title>
+        {data.map((d, i) => {
+          const frac = d.value / total;
+          const dash = frac * C;
+          // 2px surface-coloured gap between segments, so adjacent fills read as
+          // separate marks rather than one continuous ring.
+          const el = (
+            <circle
+              key={d.label}
+              cx="75"
+              cy="75"
+              r={R}
+              fill="none"
+              stroke={`var(--series-${(i % 4) + 1})`}
+              strokeWidth={STROKE}
+              strokeDasharray={`${Math.max(dash - 2, 0)} ${C - Math.max(dash - 2, 0)}`}
+              strokeDashoffset={-offset}
+              transform="rotate(-90 75 75)"
+            />
+          );
+          offset += dash;
+          return el;
+        })}
+        <text
+          x="75"
+          y="71"
+          textAnchor="middle"
+          fill="var(--text)"
+          fontSize="21"
+          fontWeight="650"
+        >
+          {total}
+        </text>
+        <text x="75" y="88" textAnchor="middle" fill="var(--muted)" fontSize="10.5">
+          employees
+        </text>
+      </svg>
+
+      <ul className="donut-legend">
+        {data.map((d, i) => (
+          <li key={d.label}>
+            <i style={{ background: `var(--series-${(i % 4) + 1})` }} />
+            <span>
+              {d.label} ({d.value})
+            </span>
+            <span className="pct">{Math.round((d.value / total) * 100)}%</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export { fmtMoney };

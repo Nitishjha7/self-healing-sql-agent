@@ -1,60 +1,100 @@
-:root {
-  --bg: #f7f7f8;
+/* Design tokens.
+ *
+ * Dark is the default here rather than a system-following flip: this is a
+ * console for watching an agent work, the surfaces it sits on are mostly code
+ * and trace output, and the whole layout was designed against a dark ground.
+ * A light theme is still fully specified and reachable from the toggle — it is
+ * a selected set of steps, not an inversion. */
+
+:root,
+:root[data-theme="dark"] {
+  --bg: #0a0d14;
+  --sidebar: #0d111a;
+  --panel: #121724;
+  --panel-2: #161c2b;
+  --border: #1e2534;
+  --border-soft: #171d2a;
+
+  --text: #e8eaf0;
+  --text-dim: #aab1c2;
+  --muted: #79839a;
+
+  --accent: #5b57e8;
+  --accent-hover: #6d69f0;
+  --accent-soft: #1b1c3d;
+  --user-bubble: #322f8a;
+  --user-text: #f2f2ff;
+
+  --code-bg: #0c1019;
+
+  --ok: #34d399;
+  --ok-soft: #0f2b22;
+  --warn: #fbbf24;
+  --warn-soft: #2c2210;
+  --err: #f87171;
+  --err-soft: #2a1418;
+  --info: #60a5fa;
+  --info-soft: #10203a;
+
+  /* Categorical series slots, stepped for this dark surface. Assigned in fixed
+     order, never cycled. Validated: worst adjacent CVD dE 8.4, normal 19.8. */
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+
+  /* SQL syntax */
+  --sql-keyword: #c084fc;
+  --sql-string: #86efac;
+  --sql-number: #fbbf24;
+  --sql-func: #7dd3fc;
+  --sql-line: #4b5570;
+
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --bg: #f6f7f9;
+  --sidebar: #ffffff;
   --panel: #ffffff;
-  --border: #e3e3e8;
-  --text: #1a1a1f;
-  --muted: #6b6b78;
-  --accent: #2f6feb;
-  --accent-soft: #eaf0fe;
-  --user-bubble: #2f6feb;
+  --panel-2: #f2f4f8;
+  --border: #e2e5ec;
+  --border-soft: #edeff4;
+
+  --text: #131722;
+  --text-dim: #3f4658;
+  --muted: #6a7285;
+
+  --accent: #4f46e5;
+  --accent-hover: #4338ca;
+  --accent-soft: #ecebfd;
+  --user-bubble: #4f46e5;
   --user-text: #ffffff;
-  --code-bg: #f2f3f7;
+
+  --code-bg: #f4f6fa;
+
   --ok: #15803d;
   --ok-soft: #e7f6ec;
   --warn: #a45c00;
   --warn-soft: #fdf0dd;
   --err: #b42318;
   --err-soft: #fdecea;
+  --info: #1d4ed8;
+  --info-soft: #e6edfd;
 
-  /* Categorical series slots — from the validated default palette (light steps).
-     Assigned in fixed order, never cycled. */
+  /* Same eight hues, light steps. Validated: worst adjacent CVD dE 9.1. */
   --series-1: #2a78d6;
   --series-2: #eb6834;
   --series-3: #1baf7a;
   --series-4: #eda100;
-  --sidebar: #ffffff;
+
+  --sql-keyword: #7c3aed;
+  --sql-string: #15803d;
+  --sql-number: #b45309;
+  --sql-func: #0369a1;
+  --sql-line: #a3aab9;
 
   color-scheme: light;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #14141a;
-    --panel: #1c1c24;
-    --border: #2d2d38;
-    --text: #ececf1;
-    --muted: #9a9aab;
-    --accent: #6f9bff;
-    --accent-soft: #1e2740;
-    --user-bubble: #2f5fd0;
-    --user-text: #ffffff;
-    --code-bg: #14141a;
-    --ok: #6ee7a4;
-    --ok-soft: #14301f;
-    --warn: #f5c07a;
-    --warn-soft: #35270f;
-    --err: #ff9d95;
-    --err-soft: #3a1917;
-
-    /* Same eight hues stepped for the dark surface, not an automatic flip. */
-    --series-1: #3987e5;
-    --series-2: #d95926;
-    --series-3: #199e70;
-    --series-4: #c98500;
-    --sidebar: #17171e;
-
-    color-scheme: dark;
-  }
 }
 
 * {
@@ -65,7 +105,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+  font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
@@ -78,4 +118,19 @@ pre {
 
 button {
   font: inherit;
+  color: inherit;
+}
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
 }
