@@ -296,10 +296,6 @@
   letter-spacing: -0.02em;
 }
 
-.wave {
-  display: inline-block;
-}
-
 .sub {
   margin: 5px 0 0;
   color: var(--muted);
@@ -951,43 +947,139 @@
 
 /* ============================ feature strip ============================ */
 
-.feature-strip {
-  margin-top: auto;
-  border-top: 1px solid var(--border);
-  padding: 14px 24px;
-  display: flex;
-  gap: 26px;
-  flex-wrap: wrap;
-  justify-content: center;
-  background: var(--sidebar);
-}
+/* ============================ status bar ============================ */
 
-.feature {
+/* One line, always visible, never scrolled away. It is deliberately quieter than
+   anything above it: this is reference information you glance at, not content
+   you read. Hence the small type, the muted labels, and no card, no icon tiles,
+   no accent fills competing with the workspace. */
+.status-bar {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  background: var(--sidebar);
+  padding: 0 24px;
+  height: 34px;
   display: flex;
   align-items: center;
-  gap: 9px;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 11.5px;
+  color: var(--text-dim);
 }
 
-.feature-icon {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  display: grid;
-  place-items: center;
-  background: var(--accent-soft);
-  color: var(--accent);
+.sb-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  /* Narrow windows scroll this row rather than wrapping it — a status bar that
+     grows to two lines stops being furniture and starts moving the layout. */
+  overflow-x: auto;
+  scrollbar-width: none;
+  white-space: nowrap;
+}
+
+.sb-group::-webkit-scrollbar {
+  display: none;
+}
+
+.sb-group.right {
+  justify-content: flex-end;
+  flex-shrink: 0;
+  overflow: visible;
+}
+
+.sb-sep {
+  width: 1px;
+  height: 12px;
+  background: var(--border);
   flex-shrink: 0;
 }
 
-.feature strong {
-  display: block;
-  font-size: 12.5px;
+.sb-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
-.feature small {
-  display: block;
-  font-size: 11px;
+.sb-field svg {
   color: var(--muted);
+}
+
+.sb-field.warn,
+.sb-field.warn svg {
+  color: var(--warn);
+}
+
+.sb-field.muted,
+.sb-field.muted svg {
+  color: var(--muted);
+}
+
+.sb-label {
+  color: var(--muted);
+}
+
+.sb-value {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  font-size: 11px;
+}
+
+.sb-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+}
+
+.sb-state .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.sb-state.ok .dot {
+  background: var(--ok);
+}
+
+.sb-state.down {
+  color: var(--err);
+}
+
+.sb-state.down .dot {
+  background: var(--err);
+}
+
+.sb-run {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+/* The one line on the bar that carries the project's own claim, so it is the one
+   line allowed a colour. Green means the model got it right unaided; amber means
+   the retry loop did the work — which is the more interesting outcome, not a
+   worse one. */
+.sb-run.clean {
+  color: var(--ok);
+}
+
+.sb-run.healed {
+  color: var(--warn);
+}
+
+.sb-run.failed {
+  color: var(--err);
+}
+
+.sb-run.waiting {
+  color: var(--warn);
+}
+
+.sb-run.working {
+  color: var(--accent);
 }
 
 /* ============================ dashboard ============================ */
@@ -1370,17 +1462,21 @@
 }
 
 @media (max-width: 820px) {
+  /* The sidebar becomes a header row here, so the rows have to be declared:
+     `auto` for it and `minmax(0, 1fr)` for everything else, or the main column
+     sizes to its content and the status bar is pushed off screen again. */
   .shell {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .sidebar {
-    position: static;
     height: auto;
     flex-direction: row;
     flex-wrap: wrap;
     align-items: center;
     gap: 10px;
+    overflow: visible;
   }
 
   .side-section,
@@ -1397,10 +1493,6 @@
   .nav {
     flex-direction: row;
     flex-wrap: wrap;
-  }
-
-  .feature-strip {
-    gap: 16px;
   }
 
   .bubble.user {
