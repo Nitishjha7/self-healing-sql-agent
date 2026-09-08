@@ -158,10 +158,12 @@ function Tile({ label, value, sub, Icon, tone }) {
       >
         <Icon size={18} />
       </span>
-      <div>
+      {/* Stacked explicitly: these are spans, so without a column flex context
+          the label and the value flow onto one line and spill out of the tile. */}
+      <div className="tile-text">
         <span className="tile-label">{label}</span>
         <span className="tile-value">{value}</span>
-        {sub && <span className="tile-label">{sub}</span>}
+        {sub && <span className="tile-sub">{sub}</span>}
       </div>
     </div>
   );

@@ -9,6 +9,11 @@
 
 /* ============================ sidebar ============================ */
 
+/* The sidebar itself does not scroll — only the conversation list inside it does.
+   Scrolling the whole column meant the brand, the nav and the memory card slid
+   away as soon as a few conversations existed, and the "New Query" button could
+   end up off screen. `overflow: hidden` here is what forces the inner section to
+   take the scrolling instead. */
 .sidebar {
   background: var(--sidebar);
   border-right: 1px solid var(--border);
@@ -19,7 +24,7 @@
   position: sticky;
   top: 0;
   height: 100vh;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .brand {
@@ -130,10 +135,24 @@
   border-radius: 999px;
 }
 
+/* This is the one region that scrolls. `flex: 1` makes it absorb the leftover
+   height and `min-height: 0` is what actually lets it shrink — without it a flex
+   child refuses to go below its content size and the overflow escapes upward,
+   which is what pushed the memory card off the bottom. */
 .side-section {
   border-top: 1px solid var(--border-soft);
   padding-top: 12px;
+  flex: 1;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.side-scroll {
+  overflow-y: auto;
+  min-height: 0;
+  margin-right: -6px;
+  padding-right: 6px;
 }
 
 .side-head {
@@ -978,6 +997,23 @@
   flex-direction: row;
   align-items: center;
   gap: 13px;
+}
+
+/* The icon sits beside a stacked label/value pair. `min-width: 0` lets a long
+   value shrink and ellipsis instead of pushing the icon out of the tile. */
+.tile-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tile-sub {
+  font-size: 11.5px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tile-icon {

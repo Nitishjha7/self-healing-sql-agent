@@ -425,7 +425,7 @@ function Sidebar({
             and stays after a reload.
           </p>
         ) : (
-          <ul className="side-list">
+          <ul className="side-list side-scroll">
             {saved.map((c) => (
               <li
                 key={c.thread_id}
