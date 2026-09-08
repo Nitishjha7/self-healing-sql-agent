@@ -32,7 +32,7 @@ Three layers: UI client, orchestration/backend, and data persistence.
 | Agent Workflow | LangGraph (Python) | State machine, node transitions, conditional self-correction branching | Implemented |
 | Conversation memory | LangGraph `PostgresSaver` | Durable per-`thread_id` checkpoints; also what makes the HITL interrupt possible | Implemented |
 | LLM Inference | LangChain + Google Gemini (`GEMINI_MODEL`) | SQL generation, error reflection, natural language synthesis | Implemented |
-| Data Store | PostgreSQL 16 (SQLAlchemy Core + psycopg2) | Target relational database for generated queries | Implemented |
+| Data Store | PostgreSQL 18 (SQLAlchemy Core + psycopg2) | Target relational database for generated queries | Implemented |
 | Data access | Direct driver, or MCP server over stdio (`USE_MCP`) | Makes the data layer a swappable tool rather than an import | Implemented |
 | API Backend | FastAPI + Uvicorn | REST endpoints serving agent execution, trace logs, responses | Implemented |
 | Write safety | LangGraph `interrupt_before` + `/api/approve` | Human approves every modifying statement before it runs | Implemented |
@@ -392,7 +392,7 @@ If the server cannot start — wrong SDK version, missing module, a crash — th
 
 Three-service Docker Compose stack:
 
-- **`db`** — `postgres:16` with a named `pgdata` volume and a `pg_isready` healthcheck; the backend waits on `service_healthy` so startup ordering is guaranteed rather than raced.
+- **`db`** — `postgres:18` with a named `pgdata` volume and a `pg_isready` healthcheck; the backend waits on `service_healthy` so startup ordering is guaranteed rather than raced.
 - **`backend`** — `python:3.11-slim`, requirements installed before the app code is copied so Docker layer caching survives code edits, running Uvicorn on port 8000.
 - **`frontend`** — multi-stage Node build served by Nginx with `/api/` reverse-proxy routing. **[Planned — only a Dockerfile scaffold exists today.]**
 

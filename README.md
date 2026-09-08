@@ -15,7 +15,7 @@ Most Text-to-SQL demos are a single LLM call: if the generated SQL is wrong, the
 | Output validation | Deterministic guard on the final answer — strips schema identifiers and leaked SQL |
 | Observability | LangSmith tracing (opt-in via env vars, off by default) |
 | API Backend | FastAPI + Uvicorn |
-| Data Store | PostgreSQL 16 (SQLAlchemy Core + psycopg2) |
+| Data Store | PostgreSQL 18 (SQLAlchemy Core + psycopg2) |
 | Frontend UI | React 18 + Vite, served by Nginx (`/api/` reverse proxy) |
 | Containerization | Docker & Docker Compose |
 
@@ -79,7 +79,7 @@ cp .env.example .env   # fill in GOOGLE_API_KEY
 docker compose up --build
 ```
 
-This brings up three containers: `db` (PostgreSQL 16), `backend` (FastAPI + agent on :8000), and `frontend` (React via Nginx on :80). Open `http://localhost` for the chat UI; Swagger docs are at `http://localhost:8000/docs`.
+This brings up three containers: `db` (PostgreSQL 18), `backend` (FastAPI + agent on :8000), and `frontend` (React via Nginx on :80). Open `http://localhost` for the chat UI; Swagger docs are at `http://localhost:8000/docs`.
 
 If those ports are taken, set `BACKEND_PORT` / `FRONTEND_PORT` in `.env` — the compose file reads both.
 

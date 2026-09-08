@@ -186,15 +186,14 @@
   gap: 3px;
 }
 
-/* Questions are free text and can be long. The sidebar is an index; the
-   transcript is where they are read. */
+/* One rule, not two. The list items wrap buttons now, so the padding lives on
+   the button rather than the li — an earlier version set it in both places and
+   the later block silently won. */
 .side-list li {
   display: flex;
   align-items: center;
-  gap: 8px;
   font-size: 12.5px;
   color: var(--muted);
-  padding: 7px 9px;
   border-radius: 8px;
 }
 
@@ -855,13 +854,16 @@
   padding: 10px 0 14px;
 }
 
+/* Sized to sit comfortably under a long transcript rather than to be minimal.
+   The earlier version was ~50px tall and read as an afterthought next to the
+   cards above it; this is the primary input on the page. */
 .composer-box {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 6px 6px 16px;
+  gap: 10px;
+  padding: 9px 9px 9px 18px;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 16px;
   background: var(--panel);
 }
 
@@ -871,11 +873,11 @@
 
 .input {
   flex: 1;
-  padding: 10px 0;
+  padding: 12px 0;
   border: none;
   background: none;
   color: var(--text);
-  font-size: 14.5px;
+  font-size: 15px;
   outline: none;
 }
 
@@ -884,9 +886,9 @@
 }
 
 .send {
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
   border: none;
   background: var(--accent);
   color: #fff;
@@ -1453,10 +1455,6 @@
 
 /* ---------- saved conversations ---------- */
 
-.side-list li {
-  padding: 0;
-  gap: 0;
-}
 
 .side-open {
   display: flex;

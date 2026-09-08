@@ -388,8 +388,8 @@ function Sidebar({
           <IconDatabase size={18} />
         </span>
         <div>
-          <strong>SQL Copilot</strong>
-          <small>Self-Healing Data Query Agent</small>
+          <strong>Amend</strong>
+          <small>Self-healing data query agent</small>
         </div>
       </div>
 
@@ -510,7 +510,7 @@ function TopBar({ view, theme, onTheme, onNew, busy }) {
           <i className="dot" /> Connected
         </span>
         <span className="pill">
-          <IconDatabase size={13} /> PostgreSQL 16
+          <IconDatabase size={13} /> PostgreSQL 18
         </span>
         <button
           className="icon-btn"

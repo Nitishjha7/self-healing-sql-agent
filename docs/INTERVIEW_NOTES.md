@@ -104,7 +104,7 @@ LangGraph StateGraph  (AgentState threaded through every node)
      synthesize_and_validate --> END
                     |
                     v
-              PostgreSQL 16
+              PostgreSQL 18
      departments <--FK-- employees  (seeded)
 ```
 
