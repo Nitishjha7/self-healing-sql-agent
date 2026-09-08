@@ -388,8 +388,8 @@ function Sidebar({
           <IconDatabase size={18} />
         </span>
         <div>
-          <strong>Amend</strong>
-          <small>Self-healing data query agent</small>
+          <strong>PRISM INTEL</strong>
+          <small>Self-Healing AI Data Agent</small>
         </div>
       </div>
 
