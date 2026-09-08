@@ -28,7 +28,8 @@ from typing import Optional
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.data_access import get_schema_description
-from app.graph import _llm, run_agent
+from app.graph import run_agent
+from app.nodes import _llm
 
 # Ek dashboard me kitne widgets. Har widget ek poora agent run hai (1-2 LLM calls,
 # retry pe aur zyada), aur free tier ~15 requests/minute deta hai. Chaar pe ek

@@ -35,7 +35,9 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+import app.config as config_mod
 import app.graph as graph_mod
+import app.nodes as nodes_mod
 from app.db import init_db, run_sql
 
 QUESTIONS_PATH = Path(__file__).parent / "questions.json"
@@ -164,9 +166,10 @@ def _run_one(question: str, delay: float) -> dict:
 
 def evaluate(questions: list[dict], max_retries: int, delay: float) -> dict:
     """Run every question at a given MAX_RETRIES setting."""
-    # graph.py reads MAX_RETRIES as a module global at call time, so patching the
-    # attribute is enough to change the retry budget between runs in-process.
-    graph_mod.MAX_RETRIES = max_retries
+    # nodes.py reads settings as `config.MAX_RETRIES` at call time rather than
+    # importing the value, so patching the module attribute is enough to change the
+    # retry budget between runs in-process.
+    config_mod.MAX_RETRIES = max_retries
 
     results = []
     print(f"\n{'=' * 70}\nMAX_RETRIES = {max_retries}\n{'=' * 70}")
@@ -257,16 +260,16 @@ def main() -> None:
 
     # graph.py imported the function by name, so patch it on graph, not db.
     if args.stale_schema:
-        graph_mod.get_schema_description = _stale_schema
+        nodes_mod.get_schema_description = _stale_schema
         print("Schema: STALE (wrong column names — induces real execution errors)")
     elif args.degrade_schema:
-        graph_mod.get_schema_description = _degraded_schema
+        nodes_mod.get_schema_description = _degraded_schema
         print("Schema: DEGRADED (no relationship hints, no example values)")
     questions = json.loads(QUESTIONS_PATH.read_text(encoding="utf-8"))
     if args.limit:
         questions = questions[: args.limit]
 
-    print(f"Model: {os.environ.get('GEMINI_MODEL', graph_mod.GEMINI_MODEL)}")
+    print(f"Model: {config_mod.GEMINI_MODEL}")
     print(f"Questions: {len(questions)} | delay: {args.delay}s")
 
     runs = [evaluate(questions, r, args.delay) for r in args.retries]

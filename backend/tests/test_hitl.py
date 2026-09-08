@@ -10,8 +10,9 @@ Ek asli end-to-end approval cycle (pause → approve → rollback report) alag s
 haath se verify hui hai; `docs/CODE_NOTES.md` me likhi hai.
 """
 
-import app.graph as graph_mod
-from app.graph import (
+import app.config as config_mod
+import app.nodes as nodes_mod
+from app.nodes import (
     after_approval,
     await_approval,
     execute_sql,
@@ -90,7 +91,7 @@ class TestExecuteGuard:
             {"sql_query": "DELETE FROM employees", "logs": [], "retry_count": 0}
         )
         assert out["error"]
-        assert out["retry_count"] == graph_mod.MAX_RETRIES, (
+        assert out["retry_count"] == config_mod.MAX_RETRIES, (
             "block ko loop se bahar nikalna chahiye — policy rejection retry se "
             "theek nahi hoti, model wahi query dobara likhega"
         )
@@ -102,8 +103,8 @@ class TestExecuteGuard:
             captured["commit"] = commit
             return 2
 
-        monkeypatch.setattr(graph_mod, "run_write", fake_run_write)
-        monkeypatch.setattr(graph_mod, "ALLOW_WRITES", False)
+        monkeypatch.setattr(nodes_mod, "run_write", fake_run_write)
+        monkeypatch.setattr(config_mod, "ALLOW_WRITES", False)
 
         out = execute_sql(
             {
@@ -126,8 +127,8 @@ class TestExecuteGuard:
             captured["commit"] = commit
             return 5
 
-        monkeypatch.setattr(graph_mod, "run_write", fake_run_write)
-        monkeypatch.setattr(graph_mod, "ALLOW_WRITES", True)
+        monkeypatch.setattr(nodes_mod, "run_write", fake_run_write)
+        monkeypatch.setattr(config_mod, "ALLOW_WRITES", True)
 
         out = execute_sql(
             {
@@ -142,7 +143,7 @@ class TestExecuteGuard:
         assert "committed" in out["query_result"].lower()
 
     def test_select_path_is_untouched_by_the_gate(self, monkeypatch):
-        monkeypatch.setattr(graph_mod, "run_sql", lambda q: [{"n": 1}])
+        monkeypatch.setattr(nodes_mod, "run_sql", lambda q: [{"n": 1}])
 
         out = execute_sql({"sql_query": "SELECT 1", "logs": [], "retry_count": 0})
 
@@ -163,7 +164,7 @@ class TestRejectionAnswer:
         def explode():
             raise AssertionError("rejection path me LLM call nahi honi chahiye")
 
-        monkeypatch.setattr(graph_mod, "_llm", explode)
+        monkeypatch.setattr(nodes_mod, "_llm", explode)
 
         out = synthesize_and_validate(
             {

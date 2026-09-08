@@ -1,7 +1,7 @@
 import { useState } from "react";
-import SqlBlock from "./SqlBlock.jsx";
-import { BarChart, DonutChart } from "./Charts.jsx";
-import { IconAlert, IconGrid, IconPause, IconSend } from "./Icons.jsx";
+import SqlBlock from "../components/SqlBlock.jsx";
+import { BarChart, DonutChart } from "../components/Charts.jsx";
+import { IconAlert, IconGrid, IconPause, IconSend } from "../components/Icons.jsx";
 
 /**
  * Phase 5 — "Create a dashboard for X" se bana hua dashboard.

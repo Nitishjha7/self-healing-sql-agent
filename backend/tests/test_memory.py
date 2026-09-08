@@ -10,8 +10,10 @@ Ek asli multi-turn conversation alag se, haath se verify hui hai — wo
 `docs/CODE_NOTES.md` me likhi hai.
 """
 
+import app.config as config_mod
 import app.graph as graph_mod
-from app.graph import _append_turn, _format_history
+import app.nodes as nodes_mod
+from app.nodes import _append_turn, _format_history
 
 
 class TestHistoryFormatting:
@@ -46,7 +48,7 @@ class TestHistoryFormatting:
 
     def test_only_the_last_few_turns_are_sent(self, monkeypatch):
         """Poori history bhejna tokens aur dhyaan dono kharch karta hai."""
-        monkeypatch.setattr(graph_mod, "HISTORY_TURNS_IN_PROMPT", 2)
+        monkeypatch.setattr(config_mod, "HISTORY_TURNS_IN_PROMPT", 2)
 
         history = [
             {"question": f"q{i}", "sql_query": f"sql{i}", "answer": f"a{i}"}

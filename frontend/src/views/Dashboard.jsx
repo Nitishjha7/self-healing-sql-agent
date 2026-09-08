@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { BarChart, BudgetChart, DonutChart, EvalChart, fmtMoney } from "./Charts.jsx";
-import { EVAL_RUNS } from "./Views.jsx";
-import { IconBuilding, IconMoney, IconTrend, IconUsers } from "./Icons.jsx";
+import { BarChart, BudgetChart, DonutChart, EvalChart, fmtMoney } from "../components/Charts.jsx";
+import { EVAL_RUNS } from "./EvalView.jsx";
+import { IconBuilding, IconMoney, IconTrend, IconUsers } from "../components/Icons.jsx";
 
 const EVAL_META = "20 questions · gemini-3.5-flash-lite · execution accuracy";
 
