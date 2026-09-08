@@ -6,7 +6,7 @@ import {
   IconPause,
   IconRefresh,
   IconShield,
-} from "./Icons.jsx";
+} from "../components/Icons.jsx";
 
 /**
  * The agent's execution trace, rendered as a timeline.
