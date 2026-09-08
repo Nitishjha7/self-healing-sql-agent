@@ -14,10 +14,10 @@ services:
       # risk running against the wrong cluster.
       - pgdata:/var/lib/postgresql
     ports:
-      # Host port override-able, backend aur frontend ki tarah — is machine pe
-      # doosre projects ke Postgres containers 5432 pehle hi le lete hain. Backend
-      # compose network pe `db:5432` se baat karta hai, to ye publish sirf host se
-      # psql chalane ke liye hai.
+      # Host port is overridable, like the backend and frontend ones — other
+      # projects on this machine already claim 5432 for their Postgres containers.
+      # The backend talks to `db:5432` on the compose network, so this publish is
+      # only for running psql from the host.
       - "${DB_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agent}"]
@@ -35,11 +35,11 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD:-agent}@db:5432/${POSTGRES_DB:-employees}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.5-flash-lite}
-      # Approved write ko commit karna hai ya chala ke rollback kar dena.
-      # Default false: approval flow poora dikhta hai, par demo data safe rehta hai.
+      # Whether an approved write is committed, or run and then rolled back.
+      # Default false: the approval flow is fully visible, the demo data stays safe.
       ALLOW_WRITES: ${ALLOW_WRITES:-false}
-      # Phase 2: database access ko MCP server ke tools ke through bhejo.
-      # Default off — seedha driver tez hai; MCP ka faayda swappability hai.
+      # Phase 2: route database access through the MCP server tools.
+      # Default off — the direct driver is faster; the point of MCP is swappability.
       USE_MCP: ${USE_MCP:-false}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-*}
       RATE_LIMIT_REQUESTS: ${RATE_LIMIT_REQUESTS:-5}
@@ -49,7 +49,7 @@ services:
       LANGCHAIN_API_KEY: ${LANGCHAIN_API_KEY:-}
       LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-self-healing-sql-agent}
     ports:
-      # Host port override-able — dusre projects bhi 8000 use karte hain.
+      # Host port is overridable — other projects use 8000 too.
       - "${BACKEND_PORT:-8000}:8000"
 
   frontend:

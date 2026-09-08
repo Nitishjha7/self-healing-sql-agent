@@ -1,13 +1,13 @@
-"""HITL approval gate ke seams — bina LLM, bina Postgres, bina interrupt chalaye.
+"""The seams of the HITL approval gate — no LLM, no Postgres, no real interrupt.
 
-Yahan jo test hota hai wo **routing aur guard ka faisla** hai: kaunsi query gate
-pe rukti hai, approval ke bina execute kya karta hai, approve/reject ke baad
-kahan jaata hai, aur write commit hota hai ya rollback. Ye sab pure functions
-aur node-level behaviour hai — asli graph interrupt chalane ke liye Postgres
-checkpointer chahiye, aur wo integration hai, unit nahi.
+What is tested here is the **routing and the guard decision**: which query stops
+at the gate, what execute does without an approval, where approve and reject lead,
+and whether a write commits or rolls back. All of that is pure functions and
+node-level behaviour — running a real graph interrupt needs a Postgres
+checkpointer, and that is integration, not unit.
 
-Ek asli end-to-end approval cycle (pause → approve → rollback report) alag se
-haath se verify hui hai; `docs/CODE_NOTES.md` me likhi hai.
+A real end-to-end approval cycle (pause → approve → rollback report) was verified
+by hand separately; it is written up in `docs/CODE_NOTES.md`.
 """
 
 import app.config as config_mod
@@ -30,16 +30,16 @@ class TestDestructiveDetection:
         assert is_destructive("DELETE FROM employees WHERE id = 1") is True
 
     def test_detection_is_case_insensitive(self):
-        """Model kabhi lowercase SQL deta hai; guard case pe nahi tik sakta."""
+        """The model sometimes emits lowercase SQL; the guard cannot rest on case."""
         assert is_destructive("drop table employees") is True
 
     def test_conservative_about_words_inside_literals(self):
-        """Ye jaan-boojh ke false positive hai, bug nahi.
+        """This false positive is deliberate, not a bug.
 
-        Substring match `'updated'` jaise literal pe bhi lag jaata hai. Uska
-        anjaam ek fizool approval prompt hai. Ulta case — write chup-chaap nikal
-        jaana — bahut mehnga hai. Test isliye hai ki ye behaviour koi galti se
-        "theek" na kar de bina trade-off samjhe.
+        A substring match also fires on a literal such as the word updated. The
+        cost of that is one needless approval prompt. The opposite case, a write
+        slipping through silently, is far more expensive. The test exists so that
+        nobody "fixes" this behaviour without understanding the trade-off.
         """
         assert is_destructive("SELECT * FROM logs WHERE msg = 'updated'") is True
 
@@ -58,9 +58,10 @@ class TestRouting:
         assert after_approval({"approval_status": "rejected"}) == "rejected"
 
     def test_missing_decision_is_treated_as_rejection(self):
-        """Resume bina faisle ke aaya to default "chalao" nahi ho sakta.
+        """If a resume arrives with no decision, the default cannot be "run it".
 
-        Gate ka poora maqsad hi yahi hai — anjaan haalat me write nahi hoti.
+        That is the entire purpose of the gate — no write happens in an unknown
+        state.
         """
         assert after_approval({}) == "rejected"
 
@@ -82,18 +83,19 @@ class TestApprovalNode:
 
 class TestExecuteGuard:
     def test_write_without_approval_is_blocked(self):
-        """Stateless mode ka path: koi checkpointer nahi, to koi interrupt nahi.
+        """The stateless path: no checkpointer, so no interrupt.
 
-        Wahan purana hard block hi sahi hai — aisa approval prompt dikhana jise
-        honour hi nahi kiya ja sakta, us prompt ka matlab hi khatam kar deta hai.
+        There the old hard block is the right behaviour — showing an approval
+        prompt that cannot be honoured drains the meaning out of the prompt
+        itself.
         """
         out = execute_sql(
             {"sql_query": "DELETE FROM employees", "logs": [], "retry_count": 0}
         )
         assert out["error"]
         assert out["retry_count"] == config_mod.MAX_RETRIES, (
-            "block ko loop se bahar nikalna chahiye — policy rejection retry se "
-            "theek nahi hoti, model wahi query dobara likhega"
+            "the block must exit the loop — a policy rejection is not fixed by "
+            "retrying, the model would just write the same query again"
         )
 
     def test_approved_write_rolls_back_when_writes_are_disabled(self, monkeypatch):
@@ -118,7 +120,7 @@ class TestExecuteGuard:
         assert captured["commit"] is False
         assert not out["error"]
         assert "rolled back" in out["query_result"].lower()
-        assert "2" in out["query_result"], "affected count report me hona chahiye"
+        assert "2" in out["query_result"], "the affected count belongs in the report"
 
     def test_approved_write_commits_when_writes_are_enabled(self, monkeypatch):
         captured = {}
@@ -153,16 +155,16 @@ class TestExecuteGuard:
 
 class TestRejectionAnswer:
     def test_rejection_answer_is_not_generated_by_the_llm(self, monkeypatch):
-        """Rejection ek fixed policy outcome hai, generate karne wali cheez nahi.
+        """A rejection is a fixed policy outcome, not something to generate.
 
-        Model se likhwane ka matlab hota use ye mauka dena ki wo narrate karte
-        hue kuch aur bol de — wahi galti pehle "removed from the HR department"
-        wale jhooth me nikli thi, jahan guard ne data bacha liya tha par jawab
-        ne deletion confirm kar di.
+        Having the model write it would give it room to narrate its way into
+        saying something else — which is exactly how the earlier "removed from the
+        HR department" lie happened, where the guard saved the data but the answer
+        confirmed the deletion anyway.
         """
 
         def explode():
-            raise AssertionError("rejection path me LLM call nahi honi chahiye")
+            raise AssertionError("the rejection path must not make an LLM call")
 
         monkeypatch.setattr(nodes_mod, "_llm", explode)
 
@@ -181,7 +183,7 @@ class TestRejectionAnswer:
         assert "nothing has been changed" in answer
 
     def test_rejected_turn_still_enters_history(self):
-        """Warna agla follow-up ek aise turn ko refer karta jo kabhi hua hi nahi."""
+        """Otherwise the next follow-up would refer to a turn that never happened."""
         out = synthesize_and_validate(
             {
                 "question": "delete everyone in HR",

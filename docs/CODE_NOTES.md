@@ -1,23 +1,23 @@
-# Code Notes — Kya Kis Liye Hai
+# Code Notes — What Exists and Why
 
-Ye file har file/dependency ka **kaam aur reason** track karti hai, taaki baad me (ya interview me) yaad rahe ki har cheez kyun li gayi. Jaise-jaise code likha jayega, isko update karte rahenge.
+This file tracks the **job and the reason** for every file and dependency, so that later (or in an interview) it is clear why each thing was chosen. It gets updated as the code grows.
 
 ---
 
 ## backend/requirements.txt
 
-| Package | Kya kaam karta hai | Kyun liya |
+| Package | What it does | Why it was chosen |
 |---|---|---|
-| `fastapi` | REST API framework — endpoints define karne ke liye (`/query` jaisa endpoint jo agent ko trigger karega) | Fast, async-native, auto Swagger docs deta hai (`/docs` pe), FastAPI industry standard hai Python backend ke liye |
-| `uvicorn[standard]` | ASGI server jo FastAPI app ko actually run karta hai | FastAPI khud server nahi hai, use run karne ke liye ek server chahiye — Uvicorn sabse common choice hai |
-| `langgraph` | Graph-based agent orchestration library | Isi se `AgentState` state machine banayenge — nodes (`generate_sql`, `execute_sql`, `synthesize`) aur conditional edges (retry loop) define karne ke liye |
-| `langchain` | LLM ke saath interact karne ka framework (prompts, chains, message formatting) | LangGraph ke nodes ke andar LLM calls isi se karenge |
-| `langchain-google-genai` | LangChain ka Gemini-specific connector | Gemini use kar rahe hain (free tier). Model name env-configurable hai (`GEMINI_MODEL`) kyunki Google ke model names deprecate hote rehte hain — `gemini-2.0-flash` aur `gemini-2.5-flash` dono is project ke dauraan 404 dene lage — isi package se Gemini ko LangChain me plug karte hain |
-| ~~`guardrails-ai`~~ | Output validation library | **⚠️ Requirements se hata diya gaya hai.** Do wajah: (1) wo wire hi nahi hua tha — actual validation filhal sirf prompt-level hai (`synthesize_and_validate` ke system prompt me); (2) `0.5.10` `langchain-core<0.3` maangta hai jabki langgraph/langchain/langchain-google-genai teeno `>=0.3` maangte hain — **isse `pip install` fail hota tha aur Docker image build hi nahi hoti thi.** Jab validator node actually banega, tab `langchain-core>=0.3` compatible version pe wapas add hoga. Interview me ise "implemented" mat bolna |
-| `sqlalchemy` | Python se SQL database ke saath talk karne ka ORM/toolkit | PostgreSQL ke saath connection aur query execution ke liye — raw psycopg2 se zyada convenient hai |
-| `psycopg2-binary` | PostgreSQL driver (actual low-level connector) | SQLAlchemy ko PostgreSQL se baat karne ke liye ye driver chahiye hota hai (SQLAlchemy khud driver nahi hai, wrapper hai) |
-| `python-dotenv` | `.env` file se environment variables load karta hai | `DATABASE_URL`, `GOOGLE_API_KEY` jaise secrets ko code me hardcode karne ke bajaye `.env` se read karne ke liye |
-| `pydantic` | Data validation / schema library | FastAPI request/response models define karne ke liye (jaise `QueryRequest { question: str }`) — FastAPI internally isi pe based hai |
+| `fastapi` | REST API framework — for defining endpoints (like `/query`, which triggers the agent) | Fast, async-native, gives automatic Swagger docs (at `/docs`); FastAPI is the industry standard for Python backends |
+| `uvicorn[standard]` | The ASGI server that actually runs the FastAPI app | FastAPI is not a server itself; it needs one to run — Uvicorn is the most common choice |
+| `langgraph` | Graph-based agent orchestration library | This is what builds the `AgentState` state machine — nodes (`generate_sql`, `execute_sql`, `synthesize`) and conditional edges (the retry loop) |
+| `langchain` | Framework for interacting with the LLM (prompts, chains, message formatting) | Used for the LLM calls inside the LangGraph nodes |
+| `langchain-google-genai` | LangChain's Gemini-specific connector | Gemini is the model in use (free tier). The model name is env-configurable (`GEMINI_MODEL`) because Google keeps deprecating model names — both `gemini-2.0-flash` and `gemini-2.5-flash` started returning 404 during this project — this package is what plugs Gemini into LangChain |
+| ~~`guardrails-ai`~~ | Output validation library | **⚠️ Removed from requirements.** Two reasons: (1) it was never wired up — validation was only prompt-level at the time (in the `synthesize_and_validate` system prompt); (2) `0.5.10` requires `langchain-core<0.3` while langgraph, langchain and langchain-google-genai all require `>=0.3` — **this made `pip install` fail and the Docker image would not build at all.** When the validator node was actually built, a deterministic implementation replaced it (see `validators.py` below). Do not call this "implemented" in an interview |
+| `sqlalchemy` | ORM/toolkit for talking to a SQL database from Python | For connecting to PostgreSQL and executing queries — more convenient than raw psycopg2 |
+| `psycopg2-binary` | PostgreSQL driver (the actual low-level connector) | SQLAlchemy needs this driver to talk to PostgreSQL (SQLAlchemy is a wrapper, not a driver) |
+| `python-dotenv` | Loads environment variables from a `.env` file | So secrets like `DATABASE_URL` and `GOOGLE_API_KEY` are read from `.env` rather than hardcoded |
+| `pydantic` | Data validation / schema library | For defining FastAPI request/response models (e.g. `QueryRequest { question: str }`) — FastAPI is built on it internally |
 
 ---
 
@@ -25,71 +25,72 @@ Ye file har file/dependency ka **kaam aur reason** track karti hai, taaki baad m
 
 ## backend/app/db.py
 
-**Kya karta hai:**
-- SQLAlchemy `engine` banata hai jo `DATABASE_URL` env var se PostgreSQL se connect hota hai (default fallback localhost pe hai agar env var na mile).
-- `init_db()` — `departments` aur `employees` dono tables create karta hai (agar already nahi hain), aur khaali hone pe 4 departments + 10 employees seed karta hai. Ye function container start hone par ek baar call hota hai.
-- `_needs_rebuild()` — purana single-table schema detect karta hai (`information_schema` se check karta hai ki `employees.department` TEXT column exist karta hai ya nahi). Mile toh dono tables drop karke naye shape me rebuild. **Kyun:** data sirf seed hai, toh drop safe hai — aur isse existing Docker volume pe bhi `docker compose up` bina kisi manual step ke chal jaata hai. Ye demo-appropriate hai, production migration strategy nahi (wahan Alembic hoti).
-- `get_schema_description()` — schema ko plain text me return karta hai. Ye LLM ko prompt me dena hota hai taaki wo columns/table naam sahi se jaan ke SQL banaye — LLM ko database ka "actual" access nahi hai, usse hum hi text me schema batate hain.
+**What it does:**
+- Creates the SQLAlchemy `engine` that connects to PostgreSQL via the `DATABASE_URL` env var (falling back to localhost if the variable is missing).
+- `init_db()` — creates the `departments`, `employees` and `projects` tables (if they do not exist) and seeds them when empty. It is called once when the container starts.
+- `_needs_rebuild()` — detects the old single-table schema (it checks `information_schema` for an `employees.department` TEXT column). If found, the tables are dropped and rebuilt in the new shape. **Why:** the data is only seed data, so dropping is safe — and it means `docker compose up` works against an existing Docker volume with no manual step. This is demo-appropriate, not a production migration strategy (that would be Alembic).
+- `get_schema_description()` — returns the schema as plain text. This goes into the LLM prompt so it knows the correct table and column names — the LLM has no "real" access to the database, we describe it in text.
 
-**Two-table schema (kyun `department` TEXT ko FK banaya):**
-Pehle sirf ek flat `employees` table thi jisme `department` ek TEXT column tha. Problem ye thi ki har question ek single-table `WHERE` filter ban jaata tha — jo model lagbhag hamesha pehli baar me sahi kar leta hai. Matlab **self-healing loop ko heal karne ke liye kuch milta hi nahi tha**, aur project ka core USP demo me kabhi trigger hi nahi hota.
+**The two-table schema (why `department` TEXT became a FK):**
+Originally there was a single flat `employees` table with `department` as a TEXT column. The problem was that every question became a single-table `WHERE` filter — which the model gets right on the first attempt almost every time. That meant **the self-healing loop had nothing to heal**, and the project's core selling point never fired in a demo.
 
-Ab `departments` (id, name, budget, location) alag table hai aur `employees.department_id` uska foreign key hai. Isse model ko join **infer** karna padta hai: "Bangalore me kaun kaam karta hai" ke liye samajhna padega ki location `departments` pe hai, `employees` me department ka naam hai hi nahi, aur `department_id` hi bridge hai. Join galat karna real Text-to-SQL ka sabse common failure hai — aur wo exactly wahi precise Postgres error deta hai (`column e.department does not exist`) jo retry prompt consume karne ke liye bana hai.
+Now `departments` (id, name, budget, location) is its own table and `employees.department_id` is a foreign key to it. That forces the model to **infer** the join: to answer "who works in Bangalore" it has to work out that location lives on `departments`, that `employees` has no department name at all, and that `department_id` is the bridge. Getting a join wrong is the most common real Text-to-SQL failure — and it produces exactly the precise Postgres error (`column e.department does not exist`) the retry prompt was built to consume.
 
-**Schema description me teen cheezein deliberately hain** jo raw DDL me nahi hoti:
-1. Example values (`'Engineering'`, `'Bangalore'`) — semantic hint
-2. Explicit relationship line: `employees.department_id -> departments.id`
-3. Ek direct warning: `employees` me department name column hai hi nahi, toh join **mandatory** hai
+**Three things are deliberately in the schema description** that raw DDL would not carry:
+1. Example values (`'Engineering'`, `'Bangalore'`) — a semantic hint
+2. An explicit relationship line: `employees.department_id -> departments.id`
+3. A direct warning: `employees` has no department name column, so the join is **mandatory**
 
-Live introspection se sirf columns milte, ye guidance nahi — aur is tareeke se prompt token cost bhi fixed aur predictable rehta hai.
-- `run_sql(query)` — koi bhi SQL string execute karta hai aur result ko dict list me convert karke deta hai (taaki JSON me easily convert ho sake API response ke liye). Agar query galat hai (syntax/schema error), SQLAlchemy exception raise karega — yehi exception LangGraph node me catch hoga aur self-healing retry trigger karega.
+Live introspection would only give the columns, not this guidance — and this way the prompt token cost stays fixed and predictable.
 
-**Design choice:** Table/columns raw SQL se banaye (SQLAlchemy Core `text()`), ORM models (declarative classes) nahi banaye — kyunki agent khud dynamic SQL likhta hai, humein fixed ORM models ki zaroorat nahi, sirf raw execution chahiye.
+- `run_sql(query)` — executes any SQL string and returns the result as a list of dicts (so it converts easily to JSON for the API response). If the query is wrong (syntax or schema error), SQLAlchemy raises an exception — that exception is caught in the LangGraph node and triggers the self-healing retry.
 
-**Security note:** `run_sql` technically kisi bhi SQL ko chala sakta hai, isliye guard `execute_sql` node me hai — destructive keywords DB call se **pehle** pakde jaate hain. Writes ab `run_write` se jaate hain, jo alag function hai aur commit karna hai ya rollback ye caller batata hai. **Sahi production answer phir bhi database-level read-only role hai** — wo prompt injection se bypass nahi ho sakta, jabki keyword matching kar sakti hai.
+**Design choice:** the tables and columns are created with raw SQL (SQLAlchemy Core `text()`), not ORM models (declarative classes) — because the agent writes dynamic SQL itself, there is no need for fixed ORM models, only raw execution.
+
+**Security note:** `run_sql` can technically run any SQL, which is why the guard sits in the `execute_sql` node — destructive keywords are caught **before** the DB call. Writes now go through `run_write`, which is a separate function where the caller decides whether to commit or roll back. **The correct production answer is still a database-level read-only role** — that cannot be bypassed by prompt injection, whereas keyword matching can.
 
 ---
 
 ---
 
-## backend/app/graph.py
+## backend/app/graph.py, nodes.py, state.py, config.py
 
-Ye file **project ka core hai** — poora self-healing LangGraph state machine yahin define hai.
+These four files are **the core of the project** — the self-healing LangGraph state machine. They were split out of a single 646-line `graph.py` because they change for different reasons: wiring, behaviour, shape, and settings.
 
-**`AgentState`** — TypedDict jo pura context carry karta hai node-to-node: question, current SQL, result, error, retry count, final answer, logs. Spec me diya gaya schema hi hai.
+**`AgentState`** (in `state.py`) — the TypedDict that carries the whole context from node to node: question, current SQL, result, error, retry count, final answer, logs. It is the schema from the spec.
 
-**`_llm()`** — Gemini ko LangChain ke through initialize karta hai (model `GEMINI_MODEL` env var se, default `gemini-3.5-flash-lite`). `temperature=0` isliye rakha kyunki SQL generation me hume deterministic/precise output chahiye, creative nahi.
+**`_llm()`** (in `nodes.py`) — initialises Gemini through LangChain (the model comes from the `GEMINI_MODEL` env var, default `gemini-3.5-flash-lite`). `temperature=0` because SQL generation needs deterministic, precise output, not creative output.
 
-**`_extract_sql()`** — LLM kabhi kabhi SQL ko ```sql ... ``` fenced block me ya extra explanation ke saath deta hai. Ye helper sirf clean SQL nikalta hai.
+**`_extract_sql()`** — the LLM sometimes returns SQL inside a ```sql ... ``` fenced block or with extra explanation. This helper pulls out just the clean SQL.
 
-**`generate_sql` node:**
-- Agar `state["error"]` khaali hai → fresh prompt banata hai (schema + question).
-- Agar error hai (matlab pichhli baar query fail hui) → **self-healing ka core part**: previous SQL + error message dono LLM ko wapas bhejta hai, taaki LLM samajh sake exactly kya galat hua aur fix kare. Ye normal "retry with same prompt" se better hai kyunki LLM ko concrete feedback milta hai.
+**The `generate_sql` node:**
+- If `state["error"]` is empty → build a fresh prompt (schema + question).
+- If there is an error (meaning the last query failed) → **the core of self-healing**: send both the previous SQL and the error message back to the LLM, so it can see exactly what went wrong and fix it. This is better than a plain "retry with the same prompt" because the LLM gets concrete feedback.
 
-**`execute_sql` node:**
-- Pehle ek **safety check** (`is_destructive`): agar generated SQL me `DROP`, `DELETE`, `UPDATE`, `INSERT`, `ALTER`, `TRUNCATE` jaisa koi keyword hai — **stateless path pe** query turant block ho jaati hai (retry count max pe set karke loop se nikal jaati hai, kyunki policy rejection retry se theek nahi hoti). **`thread_id` wale path pe ab ye block nahi, approval gate hai** — neeche "HITL approval gate" section dekho.
-- Warna `run_sql()` (db.py se) call karta hai. Success pe result state me save hota hai; exception aane pe error state me save hoke `retry_count` badhta hai.
+**The `execute_sql` node:**
+- First a **safety check** (`is_destructive`): if the generated SQL contains a keyword like `DROP`, `DELETE`, `UPDATE`, `INSERT`, `ALTER` or `TRUNCATE`, then **on the stateless path** the query is blocked immediately (retry count is set to max so it exits the loop, because a policy rejection is not fixed by retrying). **On the `thread_id` path this is no longer a block but an approval gate** — see the "HITL approval gate" section below.
+- Otherwise it calls `run_sql()` (from db.py). On success the result is saved into state; on an exception the error is saved and `retry_count` increments.
 
-**`should_retry` — conditional edge function:**
-Ye decide karta hai graph agla kaun sa node jaayega:
-- Error hai aur retries `< MAX_RETRIES (3)` → wapas `generate_sql` (retry loop)
-- Error hai aur retries khatam → `give_up` (synthesize karega ek apology message ke saath)
-- Error nahi hai → `success` (normal synthesis)
+**`should_retry` — the conditional edge function:**
+It decides which node the graph goes to next:
+- There is an error and retries `< MAX_RETRIES (3)` → back to `generate_sql` (the retry loop)
+- There is an error and retries are exhausted → `give_up` (synthesis produces an apology message)
+- There is no error → `success` (normal synthesis)
 
-Yehi function hai jo LangGraph ko **cyclic graph** banata hai — normal linear chain me ye possible nahi hota.
+This function is what makes the LangGraph a **cyclic graph** — not possible in a plain linear chain.
 
-**`synthesize_and_validate` node:**
-- Agar sab retries fail ho gaye, ek clean "sorry" message banata hai (raw exception user ko expose nahi karte).
-- Warna LLM se natural-language answer banwata hai. System prompt me explicitly bola hai raw column/table names reveal na kare aur multiple logon ki salary ek saath na dikhaye (basic schema-leakage / privacy guardrail) — ye Guardrails AI library se replace/enhance hoga agle step me, abhi prompt-level safety hai.
+**The `synthesize_and_validate` node:**
+- If every retry failed, it produces a clean "sorry" message (the raw exception is never exposed to the user).
+- Otherwise the LLM writes a natural-language answer. The system prompt explicitly says not to reveal raw column/table names and not to show several people's salaries at once (basic schema-leakage and privacy guardrails). A deterministic output guard now enforces the leakage half of this — see `validators.py`.
 
-**`build_graph()`** — teeno nodes ko wire karta hai:
+**`build_graph()`** — wires the nodes together:
 ```
 generate_sql → execute_sql → (conditional: retry → generate_sql | give_up/success → synthesize_and_validate) → END
 ```
 
-**`run_agent(question)`** — external entrypoint jo FastAPI endpoint call karega. Fresh `AgentState` banata hai aur poora graph invoke karta hai, final state return karta hai (jisme `final_answer`, `sql_query`, `logs` sab honge — UI ko yahi dikhana hai).
+**`run_agent(question)`** — the external entrypoint the FastAPI endpoint calls. It builds a fresh `AgentState`, invokes the whole graph, and returns the final state (containing `final_answer`, `sql_query` and `logs` — everything the UI needs to show).
 
-**Interview-worthy point:** Ye "retry" koi dumb `for` loop nahi hai — ye LangGraph ka **conditional edge** feature use karta hai jisse graph runtime pe decide karta hai kaunsa node next chalega, based on state. Isi wajah se ye ek real state machine hai, sequential script nahi.
+**Interview-worthy point:** this "retry" is not a dumb `for` loop — it uses LangGraph's **conditional edge** feature, so the graph decides at runtime which node runs next, based on state. That is what makes it a real state machine rather than a sequential script.
 
 ---
 
@@ -97,374 +98,342 @@ generate_sql → execute_sql → (conditional: retry → generate_sql | give_up/
 
 ## backend/app/main.py
 
-FastAPI app ka entrypoint — HTTP layer, koi agent logic nahi yahan.
+The FastAPI entrypoint — the HTTP layer, no agent logic here. The endpoints themselves live in `app/api/`.
 
-- **`@app.on_event("startup")` → `init_db()`**: container start hote hi table create/seed ho jaati hai, alag se manual step nahi karna padta.
-- **`GET /health`**: Docker healthcheck / uptime check ke liye simple ping endpoint.
-- **`POST /query`**: Frontend yahi call karega. Body me `{"question": "..."}` bhejna hoga, response me `sql_query`, `final_answer`, `logs` (poora trace), aur `retry_count` milega — UI ko yehi sab dikhana hai transparency ke liye.
-- **CORS `allow_origins=["*"]`**: Abhi dev ke liye open rakha hai taaki React (alag port/container) se backend ko call kiya ja sake bina CORS error ke. Production me isko specific frontend domain tak restrict karna chahiye — abhi ke liye note kar liya, baad me tighten karenge.
-- **Pydantic models (`QueryRequest`, `QueryResponse`)**: Request/response ka shape enforce karte hain — FastAPI inse automatically validation + `/docs` (Swagger UI) bana deta hai.
+- **`lifespan` → `init_db()`**: the tables are created and seeded as soon as the container starts, with no separate manual step. (This replaces `@app.on_event("startup")`, which newer FastAPI deprecates.)
+- **`GET /health`**: a simple ping endpoint for the Docker healthcheck and uptime checks.
+- **`POST /api/query`**: what the frontend calls. The body carries `{"question": "..."}` and the response carries `sql_query`, `final_answer`, `logs` (the full trace) and `retry_count` — all of which the UI shows, for transparency.
+- **CORS**: `ALLOWED_ORIGINS` is env-configurable, defaulting to `*` for local development so React (on a different port/container) can call the backend without CORS errors. In production it should be restricted to the specific frontend domain.
+- **Pydantic models (`QueryRequest`, `QueryResponse`)**: they enforce the request/response shape — FastAPI derives validation and the `/docs` (Swagger UI) page from them automatically.
 
 ---
 
 ## backend/Dockerfile
 
-Standard multi-line Python container build:
-1. `python:3.11-slim` base (halka image, poora Python nahi, sirf zaroori)
-2. `requirements.txt` pehle copy karke install karte hain (Docker layer caching ke liye — agar code badle but requirements na badle, install step dobara nahi chalega)
-3. Phir `app/` code copy karte hain
-4. `uvicorn` se app run karte hain port 8000 pe
+A standard multi-stage Python container build:
+1. `python:3.11-slim` base (a light image — not full Python, only what is needed)
+2. Copy `requirements.txt` first and install (for Docker layer caching — if the code changes but the requirements do not, the install step does not run again)
+3. Then copy the `app/` code
+4. Run the app with `uvicorn` on port 8000
 
-## LangSmith tracing (env vars only — koi code nahi)
+## LangSmith tracing (env vars only — no code)
 
-**Kya hai:** `LANGCHAIN_TRACING_V2=true` + `LANGCHAIN_API_KEY` + `LANGCHAIN_PROJECT` set karne se LangChain khud har LLM call ko LangSmith pe bhej deta hai — **application me ek line tracing code nahi hai.**
+**What it is:** setting `LANGCHAIN_TRACING_V2=true` plus `LANGCHAIN_API_KEY` and `LANGCHAIN_PROJECT` makes LangChain send every LLM call to LangSmith by itself — **there is not one line of tracing code in the application.**
 
-**Kaise kaam karta hai:** LangChain ka callback system in env vars ko import time pe padhta hai aur har `ChatGoogleGenerativeAI` call ko automatically instrument kar deta hai. `.env.example` aur `docker-compose.yml` dono me default `false` hai, toh bina LangSmith account ke bhi repo normally chalta hai — zero overhead, zero behaviour change.
+**How it works:** LangChain's callback system reads those env vars at import time and instruments every `ChatGoogleGenerativeAI` call automatically. Both `.env.example` and `docker-compose.yml` default it to `false`, so the repo runs normally without a LangSmith account — zero overhead, zero behaviour change.
 
-**Kyun liya (aur `logs` array kaafi kyun nahi tha):**
-`logs` **user** ke liye hai — readable trace, API response me jaata hai, UI usko dikhati hai. Usme raw prompt nahi hota (aur hona bhi nahi chahiye — wo client tak nahi jaana chahiye).
+**Why it was added (and why the `logs` array was not enough):**
+`logs` is for the **user** — a readable trace that goes out in the API response and is shown in the UI. It does not contain the raw prompt (and should not — that must not reach the client).
 
-LangSmith **developer** ke liye hai. Self-healing run inherently multi-step hai — 4 tak generation calls + synthesis, aur **prompt har attempt pe badalta hai**. Jab teen retry ke baad bhi fail ho, asli sawaal ye hota hai: *"attempt 2 pe model ne exactly kya dekha, aur error message ne usko fix kyun nahi karaya?"* — `logs` ye kabhi nahi bata sakta, kyunki wo SQL aur error record karta hai, wo poora prompt nahi jisne unhe banaya.
+LangSmith is for the **developer**. A self-healing run is inherently multi-step — up to 4 generation calls plus synthesis — and **the prompt changes on every attempt**. When something still fails after three retries, the real question is: *"what exactly did the model see on attempt 2, and why did the error message not get it to fix things?"* — `logs` can never answer that, because it records the SQL and the error, not the full prompt that produced them.
 
-LangSmith me retry chain ek nested trace ki tarah dikhti hai: har `generate_sql` invocation, uska exact rendered prompt (injected error ke saath), `_extract_sql` se pehle ka raw response, latency, aur per-attempt token cost.
+In LangSmith the retry chain appears as a nested trace: every `generate_sql` invocation, its exact rendered prompt (with the injected error), the raw response before `_extract_sql`, latency, and per-attempt token cost.
 
-**Teen cheezein jo isse debuggable ho jaati hain:**
-- **Prompt regression** — schema description edit karne se generation kharab hui? Traced prompt me diff dikh jaata hai
-- **Retry effectiveness** — attempt N+1 ne error actually incorporate kiya, ya wahi query dobara likh di?
-- **Cost/latency attribution** — slow request me kaunsa node bhaari hai, aur ek retry token me kitna mehnga padta hai
+**Three things this makes debuggable:**
+- **Prompt regression** — did editing the schema description degrade generation? The diff is visible in the traced prompt
+- **Retry effectiveness** — did attempt N+1 actually incorporate the error, or did it write the same query again?
+- **Cost/latency attribution** — which node is heavy in a slow request, and how expensive is one retry in tokens
 
-**Design choice:** do observability layers rakhna deliberate hai, redundant nahi — ek product feature hai (`logs`, client tak jaata hai), doosra developer tool (LangSmith, server-side rehta hai, raw prompts carry karta hai). Isliye LangSmith opt-in hai.
+**Design choice:** having two observability layers is deliberate, not redundant — one is a product feature (`logs`, which reaches the client), the other a developer tool (LangSmith, which stays server-side and carries raw prompts). That is why LangSmith is opt-in.
 
-**Interview value:** "agent galat step le toh debug kaise karoge?" agentic AI ka sabse common production sawaal hai. Iska jawab ab "logs array hai" nahi, "LangSmith pe poori retry chain nested trace ki tarah dikhti hai, prompt-level pe" hai.
+**Interview value:** "how would you debug an agent that takes a wrong step?" is the most common production question about agentic AI. The answer is no longer "there is a logs array", it is "the whole retry chain shows up in LangSmith as a nested trace, at prompt level".
 
 ---
 
 ## .env.example
 
-Actual secrets (`.env`) `.gitignore` me hai isliye commit nahi hoga. Ye `.env.example` file sirf **template** hai — batata hai konse env vars chahiye (`DATABASE_URL`, `GOOGLE_API_KEY` etc.) bina real values leak kiye. Isko copy karke `.env` banana hoga aur apni Gemini API key daalni hogi.
+The real secrets (`.env`) are in `.gitignore` so they are never committed. This `.env.example` file is only a **template** — it lists which env vars are needed (`DATABASE_URL`, `GOOGLE_API_KEY`, etc.) without leaking real values. Copy it to `.env` and put your own Gemini API key in.
 
 ## docker-compose.yml fix
 
-Pehle `GROQ_API_KEY` reh gaya tha jab hum Groq use karne wale the — Gemini pe switch karne ke baad ise `GOOGLE_API_KEY` kar diya taaki backend container ko sahi env var mile.
+`GROQ_API_KEY` was left behind from when Groq was going to be the provider — after switching to Gemini it became `GOOGLE_API_KEY` so the backend container gets the right env var.
 
 ---
 
-## Aage jo bhi file banegi, uska explanation yahin niche add hoga.
+## Every new file gets its explanation added below.
 
 ---
 
 ## frontend/ — React + Vite chat UI
 
-**Kya hai:** Ek single-page chat interface jo `POST /api/query` call karta hai aur response ko readable bana ke dikhata hai.
+**What it is:** a single-page chat interface that calls `POST /api/query` and renders the response readably.
 
-| File | Kaam |
+| File | Job |
 |---|---|
-| `src/App.jsx` | Poora UI — chat state, fetch call, turn rendering, retry badge, collapsible details |
-| `src/App.css` | Layout aur components ki styling |
+| `src/App.jsx` | State and composition — chat state, fetch calls, view switching |
+| `src/components/` | Sidebar, top bar, feature strip, icons, SQL block, charts |
+| `src/chat/` | Chat view, one turn, result table, composer, trace panel |
+| `src/views/` | Dashboard, generated dashboard, schema, history, eval, settings |
+| `src/Shell.css` | Layout and component styling |
 | `src/index.css` | CSS variables (light + dark), base typography |
-| `vite.config.js` | React plugin + dev-server proxy (`npm run dev` ke liye, container me nginx handle karta hai) |
-| `nginx.conf` | SPA fallback + `/api/` reverse proxy backend tak |
-| `Dockerfile` | Multi-stage — node build, phir nginx serve |
+| `vite.config.js` | React plugin + dev-server proxy (for `npm run dev`; in the container nginx handles it) |
+| `nginx.conf` | SPA fallback + `/api/` reverse proxy to the backend |
+| `Dockerfile` | Multi-stage — node build, then nginx serve |
 
-**Design choices aur unke reason:**
+**Design choices and their reasons:**
 
-- **Koi UI library nahi (Tailwind/MUI nahi)** — UI itni chhoti hai ki plain CSS se kaam ho jaata hai. Ek dependency add karne ka matlab build complexity + bundle size, bina kisi fayde ke. Interview me ye defendable hai: "scope ke hisaab se choose kiya, habit se nahi."
-- **Retry badge (`First try` / `Self-healed after N retries`)** — ye UI ka sabse important element hai. `retry_count` hi wo ek number hai jo self-healing ko *prove* karta hai; usko badge banaya taaki demo me turant dikhe.
-- **Collapsible "Show SQL & steps"** — default me band, kyunki normal user ko answer chahiye. Khol ne pe executed SQL + poora `logs` array. Ye explainability wala hissa hai — black box nahi.
-- **Trace me colour coding** — `Execution failed` / `Blocked` red, `Retry N` amber, `Execution succeeded` green. Warna logs ek undifferentiated wall of text lagti hai aur self-healing ka moment usme kho jaata hai.
-- **Nginx proxy, direct backend call nahi** — frontend `/api/query` call karta hai apne hi origin pe, toh browser me CORS ka sawaal hi nahi aata aur backend ko public expose karne ki zaroorat nahi.
-- **`proxy_read_timeout 180s`** — nginx ka default 60s hai. Ek self-healing run 5 tak LLM calls kar sakta hai; default timeout usko beech retry me kaat deta, aur user ko 504 milta jabki agent theek kaam kar raha hota.
-- **Dockerfile me `package.json` pehle copy** — layer caching, wahi reason jo backend me hai.
+- **No UI library (no Tailwind, no MUI)** — the UI is small enough that plain CSS is sufficient. Adding a dependency means build complexity and bundle size for no benefit. This is defendable in an interview: "chosen to fit the scope, not out of habit."
+- **The retry badge (`First try` / `Self-healed after N retries`)** — the single most important element in the UI. `retry_count` is the one number that *proves* self-healing; making it a badge means it is visible immediately in a demo.
+- **A collapsible "Show SQL & steps"** — closed by default, because a normal user wants the answer. Opening it shows the executed SQL and the full `logs` array. This is the explainability part — not a black box.
+- **Colour coding in the trace** — `Execution failed` / `Blocked` in red, `Retry N` in amber, `Execution succeeded` in green. Otherwise the logs read as an undifferentiated wall of text and the self-healing moment gets lost in it.
+- **An nginx proxy rather than a direct backend call** — the frontend calls `/api/query` on its own origin, so CORS never arises in the browser and the backend does not need to be publicly exposed.
+- **`proxy_read_timeout 180s`** — nginx defaults to 60s. A self-healing run can make up to 5 LLM calls; the default timeout would cut it off mid-retry and the user would get a 504 while the agent was working correctly.
+- **`package.json` copied first in the Dockerfile** — layer caching, the same reason as in the backend.
 
-**Ports:** `docker-compose.yml` me dono ports override-able hain (`BACKEND_PORT`, `FRONTEND_PORT`) — kyunki 8000 aur 80 machine pe aksar dusre projects le lete hain.
+**Ports:** both are overridable in `docker-compose.yml` (`BACKEND_PORT`, `FRONTEND_PORT`) — because 8000 and 80 are often already taken by other projects on the machine.
 
 ---
 
-## graph.py — read-only narration guard (baad me add hua)
+## The read-only narration guard (added later)
 
-`synthesize_and_validate` ke system prompt me ye lines baad me add hui:
+These lines were added later to the `synthesize_and_validate` system prompt:
 
 > "This system is STRICTLY READ-ONLY... Never state or imply that data was added, changed, removed or otherwise modified."
 
-**Kyun:** UI testing me "Delete all employees from HR" poocha. Har data-touching layer sahi chala — system prompt ne generation ko SELECT tak rakha, keyword guard ko fire karne ki zaroorat hi nahi padi, database me kuch nahi badla. **Phir synthesizer ne jawab diya: "The employees Anjali Nair and Vikram Singh have been removed from the HR department."**
+**Why:** during UI testing, "Delete all employees from HR" was asked. Every data-touching layer behaved correctly — the system prompt kept generation to a SELECT, the keyword guard never even needed to fire, and nothing in the database changed. **Then the synthesizer answered: "The employees Anjali Nair and Vikram Singh have been removed from the HR department."**
 
-Kuch remove nahi hua tha. Guard ne data bacha liya, par narration ne jhooth bol diya — aur jis user ko bataya jaye ki deletion ho gayi, uska nuksan waise hi hota hai. **False confirmation apne aap me ek alag harm class hai.**
+Nothing had been removed. The guard protected the data, but the narration lied — and a user who is told a deletion happened is harmed all the same. **A false confirmation is its own class of harm.**
 
-Ye ek achhi yaad dilane wali cheez hai: mera poora threat model "unauthorised write" pe focused tha, aur wo sab layers kaam kar rahi thi. Gap ye tha ki maine *action* guard kiya, uski *report* nahi.
+It is a useful reminder: the whole threat model had been focused on "unauthorised write", and all those layers were working. The gap was that the *action* was guarded but its *report* was not.
 
 ---
 
 ## backend/app/ratelimit.py — per-IP rate limiting
 
-**Kya karta hai:** `/query` pe per-IP sliding window limit (default 5 questions / 60 seconds), env vars se configurable.
+**What it does:** a per-IP sliding-window limit on `/query` (5 questions / 60 seconds by default), configurable through env vars.
 
-**Kyun zaroori hai (ye polish nahi hai):** Public demo pe Gemini free tier **poore project** ke liye ~15 requests/minute deta hai — sab visitors me shared. Ek bot, ya ek curious recruiter jo 20 questions poochh de, quota khatam kar dega aur uske baad **har** visitor ko error milega. Bina rate limit ke demo khud ko tod deta hai.
+**Why it matters (this is not polish):** on a public demo the Gemini free tier gives ~15 requests/minute for **the whole project** — shared across every visitor. One bot, or one curious recruiter asking 20 questions, exhausts the quota and **every** visitor after that gets an error. Without a rate limit the demo breaks itself.
 
 **Design choices:**
-- **In-memory dict of deques, koi Redis nahi** — single-container demo ke liye ye sahi trade-off hai. Multi-replica pe har process apna count rakhega, toh wahan shared store chahiye. **Ye limitation khud bolna interview me** — trade-off pata hona hi asli point hai.
-- **`/health` deliberately exempt** — UptimeRobot jaise pingers aur platform ke apne health checks kabhi throttle nahi hone chahiye. Agar `/health` bhi limited hota toh keep-alive ping hi service ko block kar deta.
-- **`X-Forwarded-For` ka pehla entry** — Cloud Run/Cloudflare/nginx sab connection khud terminate karte hain, toh `request.client.host` proxy ka IP hota hai. Header spoofable hai, par ye platforms use overwrite karte hain, aur galat hone ka nuksan sirf itna hai ki galat visitor throttle hoga — ye security boundary nahi hai.
-- **`MAX_TRACKED_IPS` ceiling** — bina iske dict har naye IP pe badhta rehta. User-controlled keys se bharne wali unbounded dict ek memory leak hi hai.
+- **An in-memory dict of deques, no Redis** — the right trade-off for a single-container demo. With multiple replicas each process would keep its own count, and that needs a shared store. **Say this limitation yourself in an interview** — knowing the trade-off is the actual point.
+- **`/health` deliberately exempt** — pingers like UptimeRobot and the platform's own health checks must never be throttled. If `/health` were limited, the keep-alive ping itself would block the service.
+- **The first entry of `X-Forwarded-For`** — Cloud Run, Cloudflare and nginx all terminate the connection themselves, so `request.client.host` is the proxy's IP. The header is spoofable in general, but these platforms overwrite it, and the cost of getting it wrong is only that the wrong visitor is throttled — this is not a security boundary.
+- **A `MAX_TRACKED_IPS` ceiling** — without it the dict grows with every new IP. An unbounded dict fed by user-controlled keys is a memory leak.
 
-**Verified:** 5 requests pass, 6th se 429 with `Retry-After`, aur `/health` bilkul throttle nahi hota.
+**Verified:** 5 requests pass, the 6th returns 429 with `Retry-After`, and `/health` is never throttled.
 
 ---
 
 ## main.py — configurable CORS
 
-`ALLOWED_ORIGINS` env var (comma-separated), default `*`.
+The `ALLOWED_ORIGINS` env var (comma-separated), default `*`.
 
-**Kyun:** local me frontend nginx ke through same origin pe serve hota hai, toh CORS ki zaroorat hi nahi. Deploy pe frontend (Cloudflare Pages) aur backend (Cloud Run) alag origins pe hote hain — tab CORS chahiye, **par sirf apne frontend ke liye**. `*` chhod dena matlab koi bhi website tumhara backend call kar sakti hai aur tumhari LLM quota jala sakti hai.
+**Why:** locally the frontend is served through nginx on the same origin, so CORS is not needed at all. On a split deploy the frontend (Cloudflare Pages) and backend (Cloud Run) are on different origins — then CORS is needed, **but only for your own frontend**. Leaving it as `*` means any website can call your backend and burn your LLM quota.
 
-`allow_methods` bhi `["*"]` se `["GET", "POST"]` kar diya aur headers sirf `Content-Type` — API sirf yahi use karta hai, baaki khula rakhne ka koi reason nahi.
+`allow_methods` was also narrowed from `["*"]` to the methods actually used, and headers to just `Content-Type` — the API only uses those, and there is no reason to leave the rest open.
 
 ---
 
 ## frontend — VITE_API_BASE
 
-`App.jsx` me `const API_BASE = import.meta.env.VITE_API_BASE || ""`.
+In `App.jsx`: `const API_BASE = import.meta.env.VITE_API_BASE || ""`.
 
-Default khaali hai — Docker setup me nginx same origin pe `/api` proxy karta hai, toh relative URL hi chahiye. Split deployment me build ke time `VITE_API_BASE` set hota hai.
+The default is empty — in the Docker setup nginx proxies `/api` on the same origin, so a relative URL is what is wanted. On a split deployment `VITE_API_BASE` is set at build time.
 
-**Dhyan rakhna:** ye **build-time** variable hai, runtime nahi — Vite ise bundle me bake kar deta hai. Cloudflare Pages pe value badalne ke baad **redeploy karna zaroori hai**, warna purani value chalti rahegi. Ye ek common gotcha hai.
+**Watch out:** this is a **build-time** variable, not a runtime one — Vite bakes it into the bundle. After changing the value on Cloudflare Pages you **must redeploy**, otherwise the old value keeps being used. This is a common gotcha.
 
-**429 handling:** frontend `res.status === 429` alag se pakadta hai aur backend ka `detail` message dikhata hai — kyunki throttle hona ek normal, samjhane wali state hai, generic error nahi.
-
----
-
-## Dockerfile (root) — single-service deployment image
-
-**Kya karta hai:** Do-stage build. Stage 1 me Node React app build karta hai; stage 2 me Python image banti hai aur built files `static/` me copy ho jaati hain. FastAPI dono serve karta hai — API bhi, UI bhi.
-
-**`backend/Dockerfile` se alag kyun:** wo local `docker-compose` ke liye hai jahan nginx alag se frontend serve karta hai. Ye root wala deployment ke liye hai. Dono rehne dene ka reason: local dev me nginx wala setup production-jaisa reverse proxy dikhata hai, aur deploy pe ek service rakhna simplest hai.
-
-**Ek service kyun, do nahi:**
-- Render free tier pe ek web service milti hai, aur split deploy me **dono** ko warm rakhna padta
-- Same origin matlab **CORS ki zaroorat hi nahi** — ek poori class ki configuration aur uske bugs khatam
-- Frontend ka backend URL build-time me bake karne ka jhanjhat nahi (`VITE_API_BASE` khaali rehta hai)
-
-**`CMD` shell form me kyun:** Render (aur zyadatar PaaS) `$PORT` env var inject karte hain jispe bind karna hota hai. Exec form (`["uvicorn", ...]`) me `${PORT}` expand nahi hota — literal string chala jaata. Isliye `sh -c` use kiya, aur `${PORT:-8000}` default rakha taaki local `docker run` bhi chale.
+**429 handling:** the frontend catches `res.status === 429` separately and shows the backend's `detail` message — because being throttled is a normal, explainable state, not a generic error.
 
 ---
 
-## main.py — `/api` prefix aur static mount
+## Dockerfile (root) — the single-service deployment image
 
-**`/api` prefix kyun:** built frontend `/` pe mount hota hai, aur wo mount uske neeche ka har path nigal leta hai. Agar API routes `/query` pe hote toh static mount ke saath collide karte. Sab kuch `/api/*` pe rakhne se dono saath rehte hain.
+**What it does:** a two-stage build. Stage 1 builds the React app with Node; stage 2 builds the Python image and copies those built files into `static/`. FastAPI serves both the API and the UI.
 
-**Mount sabse last me kyun:** FastAPI routes registration order me match karta hai. `app.mount("/")` pehle likh dete toh wo API routes ko bhi kha jaata. Isliye router include karne ke **baad** mount kiya, aur file me comment bhi likh diya taaki koi galti se upar na le jaye.
+**Why it differs from `backend/Dockerfile`:** that one is for local `docker-compose`, where nginx serves the frontend separately. This root one is for deployment. Both are kept because the nginx setup in local dev demonstrates a production-like reverse proxy, while a single service is the simplest thing to deploy.
 
-**`/health` do jagah kyun:** `/api/health` frontend ke liye consistent hai, aur `/health` root pe isliye kyunki platform health checks aur uptime pingers wahi expect karte hain. Dono rate limiter se exempt.
+**Why `CMD` is in shell form:** Render (and most PaaS platforms) inject a `$PORT` env var that must be bound. In exec form (`["uvicorn", ...]`) `${PORT}` is not expanded — the literal string is passed through. So `sh -c` is used, with a `${PORT:-8000}` default so a local `docker run` works too.
 
-**`if STATIC_DIR.is_dir()`** — compose setup me `static/` hoti hi nahi (nginx serve karta hai). Bina is check ke app wahan crash kar jaata. Ek hi codebase dono deployment shapes support karta hai.
+---
 
-**nginx me `proxy_pass` se trailing slash hataya** — pehle `http://backend:8000/` tha jo `/api` prefix strip kar deta tha. Ab FastAPI khud `/api` expect karta hai, toh path preserve karna zaroori hai.
+## main.py — the `/api` prefix and the static mount
+
+**Why the `/api` prefix:** the built frontend is mounted at `/`, and that mount swallows every path below it. If the API routes were at `/query` they would collide with the static mount. Keeping everything under `/api/*` lets both coexist.
+
+**Why the mount is last:** FastAPI matches routes in registration order. Writing `app.mount("/")` first would let it swallow the API routes too. So it is mounted **after** the routers are included, with a comment in the file so nobody moves it up by accident.
+
+**Why `/health` exists twice:** `/api/health` is consistent for the frontend, and `/health` at the root because platform health checks and uptime pingers expect it there. Both are exempt from the rate limiter.
+
+**`if STATIC_DIR.is_dir()`** — in the compose setup `static/` does not exist (nginx serves it). Without this check the app would crash there. One codebase supports both deployment shapes.
+
+**The trailing slash was removed from nginx's `proxy_pass`** — it used to be `http://backend:8000/`, which stripped the `/api` prefix. FastAPI now expects `/api` itself, so the path has to be preserved.
 
 ---
 
 ## render.yaml
 
-Render Blueprint — service settings version control me rakhta hai (dashboard me manually click karne ke bajaye).
+A Render Blueprint — it keeps the service settings in version control (rather than clicking through the dashboard).
 
-**Database yahan define nahi ki** — Render ka free Postgres **30 din baad expire** ho jaata hai. Portfolio link chupchaap mar jaata aur pata bhi na chalta. Neon free tier expire nahi hota.
+**The database is deliberately not defined here** — Render's free Postgres **expires after 30 days**. The portfolio link would die quietly with no warning. The Neon free tier does not expire.
 
-**Secrets `sync: false`** — matlab value Render dashboard me daalni hai, YAML me nahi. Blueprint commit hota hai; usme API key likhna wahi galti hai jo `.env.example` me key daalna thi.
+**Secrets are `sync: false`** — meaning the value goes in the Render dashboard, not in the YAML. The Blueprint is committed; putting an API key in it would be the same mistake as putting one in `.env.example`.
 
-## backend/app/checkpointer.py — conversation memory (baad me add hua)
+## backend/app/checkpointer.py — conversation memory (added later)
 
-**Kya:** ek process-wide `PostgresSaver`, lazy banta hai aur fail-open hai.
+**What:** a process-wide `PostgresSaver`, built lazily and fail-open.
 
-**Kyun Postgres, `MemorySaver` kyun nahi:** `MemorySaver` state process me rakhta
-hai. Render ka free tier 15 min me sota hai — user wapas aake follow-up poochta
-hai aur conversation gayab. Postgres is stack me pehle se hai, to durability ke
-liye koi naya service nahi lagta. **Verified:** conversation ke beech backend
-container restart kiya, phir usi thread pe "that department's budget?" poocha —
-history Postgres se wapas aayi aur reference sahi resolve hua.
+**Why Postgres and not `MemorySaver`:** `MemorySaver` keeps state in the process. Render's free tier sleeps after 15 minutes — the user comes back, asks a follow-up, and the conversation is gone. Postgres is already in this stack, so durability needs no new service. **Verified:** the backend container was restarted mid-conversation, then "that department's budget?" was asked on the same thread — the history came back from Postgres and the reference resolved correctly.
 
-**Kyun `pool` aur `autocommit=True`:** `PostgresSaver` ke peeche connection pool
-hai, isliye ek hi baar banta hai (har request pe naya pool = connection leak).
-`autocommit` ke bina checkpoint writes ek khuli transaction me latak jaate hain
-aur agli request unhe dekh hi nahi paati.
+**Why a pool and `autocommit=True`:** a `PostgresSaver` holds a connection pool, so it is built exactly once (a new pool per request is a connection leak). Without `autocommit`, checkpoint writes hang in an open transaction and the next request never sees them.
 
-**Kyun fail-open:** DB tak pahunch na ho to app crash nahi karti, memory chup-chaap
-off ho jaati hai — par API `memory_active: false` lautati hai. Feature down hona
-ek cheez hai; **chupke se** down hona doosri, kyunki tab user ko lagta hai agent
-bhool gaya jabki memory kabhi on hi nahi thi.
+**Why fail-open:** if the DB is unreachable the app does not crash, memory switches off quietly — but the API returns `memory_active: false`. A feature being down is one thing; being down **silently** is another, because then the user thinks the agent forgot when memory was never on.
 
-## graph.py — `history`, aur per-turn vs per-conversation state
+## graph.py — `history`, and per-turn vs per-conversation state
 
-**Sabse zaroori baat:** checkpointer akela follow-up kaam nahi karata. Wo state ko
-durable banata hai; model checkpoint padh nahi sakta. Purane turns ka prompt me
-pahunchna bhi utna hi zaroori hai — `_format_history()` wahi karta hai.
+**The most important point:** the checkpointer alone does not make follow-ups work. It makes state durable; the model cannot read a checkpoint. Getting previous turns into the prompt matters just as much — that is what `_format_history()` does.
 
-Har turn ka **SQL** bhi bhejte hain, sirf angrezi answer nahi: `ORDER BY
-AVG(e.salary) DESC LIMIT 1` ye baat answer se zyada saaf batata hai ki "them"
-kiski baat hai.
+Each turn's **SQL** is sent too, not just the English answer: `ORDER BY AVG(e.salary) DESC LIMIT 1` says far more clearly than the answer does what "them" refers to.
 
-**Aur wo cheez jo checkpointer ne naya paida ki:** ab state turns ke beech survive
-karti hai, to har field ka scope tay karna padta hai. `run_agent` ka input dict
-checkpointed state ke **upar merge** hota hai — jo key usme nahi hogi wo pichhle
-turn se carry ho jaayegi. `history` ko carry hona chahiye; `retry_count`, `logs`,
-`error` ko **bilkul nahi** — warna pichhle turn ki 3 retries agle turn ke pehle hi
-error pe "give up" karwa dengi, aur trace me pichhle sawaal ki lines dikhengi.
-Isliye `run_agent` per-turn fields explicitly reset karta hai. Yahi ek line memory
-feature aur memory bug ka farak hai.
+**And the thing the checkpointer newly created:** state now survives between turns, so every field needs a declared scope. The input dict from `run_agent` is **merged over** the checkpointed state — any key missing from it carries over from the previous turn. `history` should carry over; `retry_count`, `logs` and `error` **absolutely should not** — otherwise the previous turn's 3 retries would make the next turn give up on its very first error, and the trace would show the previous question's lines. That is why `run_agent` explicitly resets the per-turn fields. That single line is the difference between a memory feature and a memory bug.
 
-`history` pe additive reducer (`Annotated[..., operator.add]`) jaan-boojh ke nahi
-lagaya: nodes `{**state, ...}` return karte hain, to har node poori history wapas
-bhejta hai — reducer use har baar dobara jod deta aur history exponentially badhti.
-Overwrite semantics ke saath sirf `synthesize_and_validate` ek turn add karta hai,
-graph ka aakhri node, jo har turn me theek ek baar chalta hai (`generate_sql`
-retry loop me dobara chalta hai — wahan append karna ek turn ki teen entries banata).
+There is deliberately **no** additive reducer (`Annotated[..., operator.add]`) on `history`: nodes return `{**state, ...}`, so every node already returns the whole history — a reducer would re-append it every time and history would grow exponentially. With overwrite semantics only `synthesize_and_validate` adds a turn: the last node in the graph, which runs exactly once per turn (`generate_sql` runs again inside the retry loop — appending there would produce three entries for one turn).
 
-## backend/tests/ — is project ke pehle tests
+## backend/tests/ — the first tests in this project
 
-10 tests, bina API key aur bina database ke. Ye memory ki **semantics** test karte
-hain, model ki quality nahi — kaunsi state carry hoti hai aur kaunsi reset, ye poora
-sawaal LLM ke bahar hai. Gemini free tier 20 requests/day deta hai; us quota ko un
-tests pe kharch karna jo usse kuch seekh hi nahi rahe, seedha nuksan hai.
+69 tests, with no API key and no database. They test the **semantics** of memory, not the quality of the model — which state carries and which resets is a question that lives entirely outside the LLM. The Gemini free tier gives 20 requests/day; spending that quota on tests that learn nothing from it is a straight loss.
 
-`Dockerfile.test` isliye ki is machine pe local Python nahi hai.
+`Dockerfile.test` exists because there is no local Python on this machine.
 
 ---
 
 ## HITL approval gate (Phase 3)
 
-**Files:** `graph.py` (`needs_approval`, `await_approval`, `after_approval`, `is_destructive`, `execute_sql`), `db.py` (`run_write`), `main.py` (`/api/approve`), `frontend/src/App.jsx` (approval card).
+**Files:** `nodes.py` (`needs_approval`, `await_approval`, `after_approval`, `is_destructive`, `execute_sql`), `graph.py` (the interrupt wiring), `db.py` (`run_write`), `api/query.py` (`/api/approve`), `frontend/src/chat/Turn.jsx` (the approval card).
 
-**Kya karta hai:** destructive query ab hard block nahi hoti — graph rukta hai, exact statement user ko dikhata hai, aur faisle ka intezaar karta hai.
+**What it does:** a destructive query is no longer hard-blocked — the graph pauses, shows the user the exact statement, and waits for a decision.
 
-### Teen cheezein jo build karte waqt pata chali
+### Three things learned while building it
 
-**1. Dedicated approval node banana pada.** Is LangGraph version me dynamic `interrupt()` hai hi nahi — sirf static `interrupt_before=[...]`, jo named node se pehle **har baar** rukta hai. `execute_sql` pe lagate to har `SELECT` bhi ruk jaata. Alag `await_approval` node banane se pause **conditional** ho gaya: routing tay karti hai ki is turn me gate se guzarna hai ya nahi.
+**1. A dedicated approval node was necessary.** This LangGraph version has no dynamic `interrupt()` — only static `interrupt_before=[...]`, which pauses **every time** before the named node. Putting that on `execute_sql` would pause every `SELECT` too. Making `await_approval` a separate node made the pause **conditional**: routing decides whether this turn passes through the gate at all.
 
-**2. HITL checkpointer ke bina possible hi nahi.** Do HTTP requests ke beech graph state kahin save honi chahiye — bina uske resume karne ko kuch hai hi nahi. Isliye stateless path (bina `thread_id`) purane hard block pe hi rehta hai. **Ye gap nahi, sahi behaviour hai:** aisa approval prompt dikhana jise honour hi nahi kiya ja sakta, seedha refuse karne se bura hai. Phase 4 ka Phase 3 se pehle aana ittefaq nahi tha.
+**2. HITL is impossible without a checkpointer.** The graph state has to be saved somewhere between two HTTP requests — without that there is nothing to resume. So the stateless path (no `thread_id`) keeps the old hard block. **That is not a gap, it is the right behaviour:** showing an approval prompt that cannot be honoured is worse than refusing outright. Phase 4 landing before Phase 3 was not a coincidence.
 
-**3. Generation prompt badalna zaroori tha, warna poora phase dead code hota.** System prompt me likha tha "only ever write SELECT queries" — ye constraint isliye thi **kyunki gate nahi tha**. Gate banane ke baad bhi wo line chhod dete to destructive SQL kabhi banti hi nahi, gate kabhi fire hi nahi hota, aur phase aisa "kaam karta" dikhta jaise sab theek hai — jabki wahan tak kuch pahunchta hi nahi.
+**3. The generation prompt had to change, or the whole phase would be dead code.** The system prompt said "only ever write SELECT queries" — a constraint that existed **because there was no gate**. Leaving that line in after building the gate would mean destructive SQL is never generated, the gate never fires, and the phase looks like it "works" while nothing ever reaches it.
 
-> Ye pehli baar testing me hi pakda gaya: "Delete all employees from HR" poocha aur model ne `SELECT` likh diya, gate skip ho gaya. Ab prompt `hitl_enabled` pe conditional hai.
+> This was caught on the very first test: "Delete all employees from HR" was asked and the model wrote a `SELECT`, skipping the gate. The prompt is now conditional on `hitl_enabled`.
 
-### `ALLOW_WRITES` — approve hona aur commit hona alag hai
+### `ALLOW_WRITES` — being approved and being committed are different
 
-`false` (default) pe approved statement **phir bhi chalta hai** — Postgres plan karta hai, constraints enforce karta hai, affected rows batata hai — aur rollback ho jaata hai. Isse public demo pe approval flow dikhaya ja sakta hai bina kisi visitor ko table khaali karne ki taakat diye.
+At `false` (the default) an approved statement **still runs** — Postgres plans it, enforces the constraints, reports the affected rows — and then rolls back. That makes the approval flow demonstrable on a public deployment without handing any visitor the ability to empty a table.
 
-**Ye approval ka dikhava nahi hai:** response me saaf likha jaata hai ki rollback hua aur kitni rows par asar padta. Safe mode me chalana aur jhoot bolna do alag cheezein hain.
+**This is not approval theatre:** the response says plainly that it was rolled back and how many rows would have been affected. Running in a safe mode and lying are two different things.
 
-`run_write` ko `run_sql` se alag rakha: `run_sql` contract se read-only hai aur uska caller result set expect karta hai; write ke paas rows hoti hi nahi (`result.keys()` wahan error deta hai). Dono ko mila dena wahi tareeka hai jisse ek "read-only" helper chupke se data badalne lagta hai.
+`run_write` is kept separate from `run_sql`: `run_sql` is read-only by contract and its caller expects a result set; a write has no rows at all (`result.keys()` raises there). Merging the two is exactly how a "read-only" helper quietly starts modifying data.
 
-### Synthesis prompt dono taraf guard karta hai
+### The synthesis prompt guards both directions
 
-Pehle hardcoded tha "this system is STRICTLY READ-ONLY". `ALLOW_WRITES=true` ke baad wo **ulti** direction me jhoot bulwata: ek write jo sach me commit ho gaya, use "kuch nahi badla" batata. Ab prompt flag pe conditional hai.
+It used to hardcode "this system is STRICTLY READ-ONLY". After `ALLOW_WRITES=true` existed, that made it lie in the **opposite** direction: a write that genuinely committed would be reported as "nothing changed". The prompt is now conditional on the flag.
 
-Yahi wahi sabak hai jo pehle false-confirmation bug me mila tha ("removed from the HR department" wala jhooth), bas iski mirror image — **na jhoothi confirmation, na jhoothi tasalli.**
+This is the same lesson as the earlier false-confirmation bug (the "removed from the HR department" lie), just mirrored — **no false confirmation, and no false reassurance either.**
 
-Rejection ka jawab LLM se generate hi nahi hota — wo ek fixed policy outcome hai. Model se likhwane ka matlab hota use narrate karte hue kuch aur bolne ka mauka dena.
+The rejection answer is not generated by the LLM at all — it is a fixed policy outcome. Having the model write it would give it room to narrate its way into saying something else.
 
-### 409 kyun, 200 ya 400 nahi
+### Why 409 and not 200 or 400
 
-Aisi thread ko approve karna jo pause hai hi nahi (double-click, purana tab) — na caller ki galti hai na server ki kharabi. Chup-chaap 200 lauta dena sabse bura hota: user ko lagta uska faisla laga diya gaya, jabki kuch hua hi nahi.
+Approving a thread that is not paused (a double-click, a stale tab) is neither the caller's mistake nor a server fault. Silently returning 200 would be the worst option: the user would believe their decision was applied when nothing happened.
 
-### Kya verify hua, kya nahi
+### What was verified, and what was not
 
-**Verified (live, Postgres ke saath):** gate destructive query pe rukta hai (`awaiting_approval: true`, khaali `final_answer`), reject karne pe kuch nahi chalta, approve karne pe statement chalta hai aur rollback hota hai (2 rows report, data intact), dobara approve karne pe 409.
+**Verified (live, against Postgres):** the gate pauses on a destructive query (`awaiting_approval: true`, empty `final_answer`), rejecting runs nothing, approving runs the statement and rolls back (2 rows reported, data intact), and approving twice returns 409.
 
-**⚠️ Verified nahi:** `ALLOW_WRITES=true` wala commit path asli database pe nahi chalaya — wo sach me rows delete karta aur demo data chala jaata. Us branch ko unit test cover karta hai (fake `run_write` ke saath, dono directions), par end-to-end nahi. **Interview me ye khud bolna.**
+**⚠️ Not verified:** the `ALLOW_WRITES=true` commit path was never run against the real database — it would genuinely delete rows and the demo data would be gone. That branch is covered by unit tests (with a fake `run_write`, in both directions), but not end to end. **Say this yourself in an interview.**
 
 ---
 
-## backend/app/validators.py — output guard
+## backend/app/validators.py — the output guard
 
-**Kya karta hai:** final answer se schema identifiers aur leak hui SQL nikaal deta hai, aur jo mila uski list `guardrail_flags` me deta hai.
+**What it does:** strips schema identifiers and leaked SQL out of the final answer, and reports what it found in `guardrail_flags`.
 
-### Guardrails AI kyun nahi (do baar koshish ki)
+### Why not Guardrails AI (tried twice)
 
-| Version | Maangta hai | Nateeja |
+| Version | Requires | Result |
 |---|---|---|
-| `<= 0.5` | `langchain-core<0.3` | Conflict — humein `>=0.3` chahiye |
-| `>= 0.6` | `langchain-core>=1.0` | Conflict — langgraph 0.2 `<0.4` maangta hai |
+| `<= 0.5` | `langchain-core<0.3` | Conflict — we need `>=0.3` |
+| `>= 0.6` | `langchain-core>=1.0` | Conflict — langgraph 0.2 requires `<0.4` |
 
-Beech me koi version hai hi nahi. Use karne ke liye poora **langchain 1.x migration** karna padta — jo checkpointer aur graph APIs tod deta — sirf ek validator ke liye.
+There is no version in between. Using it would have meant a full **langchain 1.x migration** — breaking the checkpointer and graph APIs — for the sake of one validator.
 
-**Aur yahan deterministic check waise bhi behtar hai.** Schema leakage ek *syntactic* baat hai: jawab me `employees.salary` likha hai ya nahi. Ye regex ka kaam hai, judgement ka nahi. Iske liye ek aur LLM lagana matlab ek deterministic check ko probabilistic bana dena — **aur us naye LLM ko kaun check karega.**
+**And a deterministic check is the better fit here anyway.** Schema leakage is a *syntactic* property: either the answer contains `employees.salary` or it does not. That is a job for a regex, not for judgement. Adding another LLM for it turns a deterministic check into a probabilistic one — **and then who checks that LLM.**
 
-### Sabse important line: kya flag NAHI karte
+### The most important line: what is NOT flagged
 
-`salary`, `name`, `role`, `budget`, `location` — ye schema me bhi hain aur aam angrezi me bhi. Inhe flag karna **har sahi jawab tod deta.** Isliye flag sirf wo hote hain jo prose me kabhi nahi aate:
+`salary`, `name`, `role`, `budget`, `location` — these are in the schema and also in ordinary English. Flagging them would **break every correct answer.** So only things that never appear in prose are flagged:
 - Qualified identifiers: `employees.salary`, `e.name`, `d.budget`
-- `department_id` (schema-only naam)
-- `SELECT ... FROM` (SQL fragment)
+- `department_id` (a schema-only name)
+- `SELECT ... FROM` (a SQL fragment)
 
-Generic `\w+\.\w+` pattern jaan-boojh ke nahi liya — wo "e.g." aur har sentence boundary pe lag jaata. Pattern schema ke **asli naamon** se banaya gaya hai, isliye false positives lagbhag khatam ho jaate hain.
+A generic `\w+\.\w+` pattern was deliberately avoided — it matches "e.g." and every sentence boundary. The pattern is built from the schema's **real names**, which removes almost all false positives.
 
-### Redact karte hain, block nahi
+### Redact, do not block
 
-Schema naam leak hona low severity hai — ek sahi jawab ko uske liye maar dena user ke liye leak se zyada bura hai. **Lekin chup-chaap theek kar dena bhi galat hai:** flags API response me jaate hain aur trace me line aati hai, taaki "guard ne kaam kiya" aur "guard ki kabhi zaroorat hi nahi padi" alag dikhein.
+A leaked schema name is low severity — killing a correct answer over it is worse for the user than the leak. **But fixing it silently would be wrong too:** the flags travel out in the API response and a line appears in the trace, so that "the guard did something" and "the guard was never needed" look different.
 
-Ek apwaad: poori SQL answer me aa jaana. Wahan tukde kaat kar bacha hua text dikhana user ko ek adhoora, bharosemand-dikhne wala jawab de deta — isliye poora answer badal jaata hai.
+One exception: a whole query appearing in the answer. Cutting pieces out and showing the remainder would hand the user a partial answer that still looks trustworthy — so the whole answer is replaced.
 
-### Jo enforce nahi hota, aur kyun
+### What is not enforced, and why
 
-Synthesis prompt ye bhi kehta hai ki ek se zyada logon ki salary figures na do. **Wo rule deterministic nahi ho sakta:** "Engineering ka average 101750, Sales ka 73000" me do figures hain par wo aggregate hain, kisi vyakti ki salary nahi. Dono ko alag karne ke liye semantics chahiye. Us rule ko enforce karne ka **dikhava** karne se behtar hai maan lena ki wo abhi prompt-level hi hai.
+The synthesis prompt also says not to give salary figures for more than one person. **That rule cannot be made deterministic:** "Engineering averages 101750, Sales 73000" has two figures, but they are aggregates, not any individual's salary. Separating those needs semantics. Rather than **pretend** to enforce it, it is honest to say that rule stays at the prompt level.
 
 ---
 
 ## Frontend — app shell, trace rail, dashboard
 
-**Files:** `App.jsx` (shell + chat), `TracePanel.jsx`, `Dashboard.jsx`, `Charts.jsx`, `Shell.css`.
+**Files:** `App.jsx` (shell composition), `chat/TracePanel.jsx`, `views/Dashboard.jsx`, `components/Charts.jsx`, `Shell.css`.
 
-**Trace rail sabse zaroori hissa hai.** Poore project ka daawa ye hai ki agent database error padhkar apni query khud sudhaarta hai — aur ek chat bubble jisme sirf final answer dikhe, **theek wahi view hai jisme ye daawa invisible ho jaata hai.** Retry screen pe tabhi exist karta hai jab failure bhi dikhe. Isliye trace ek alag panel hai, ek collapsed accordion nahi.
+**The trace rail is the most important part.** The whole project claims that the agent reads a database error and fixes its own query — and a chat bubble showing only the final answer is **exactly the view in which that claim becomes invisible.** A retry only exists on screen if the failure is visible too. That is why the trace is its own panel rather than a collapsed accordion.
 
-**Charts hand-rolled SVG/CSS hain, koi library nahi.** Do forms, char categories — ye kuch dozen lines hain. Recharts lane ka matlab hota ek single-page bundle me ~500KB, aur exactly un cheezon ka control chhodna jo yahan matter karti hain: mark geometry, label placement, theme tokens.
+**The charts are hand-rolled SVG/CSS, no library.** Two forms, four categories — a few dozen lines. Pulling in Recharts would mean ~500KB in a single-page bundle, and giving up control over exactly the things that matter here: mark geometry, label placement, theme tokens.
 
-**Colours validated categorical palette se hain** (`--series-1..4` in `index.css`), fixed order me assign hote hain, cycle nahi hote. Light aur dark ke steps **alag chune gaye hain**, automatic flip nahi. Dono modes validator se pass hue: worst adjacent CVD ΔE 9.1 light / 8.4 dark. Light mode me contrast 3:1 se neeche aata hai — iska relief ye hai ki **har bar apni value label ke saath aata hai**, isliye identity kabhi color-alone pe nahi tikti.
+**The colours come from a validated categorical palette** (`--series-1..4` in `index.css`), assigned in a fixed order rather than cycled. The light and dark steps were **chosen separately**, not flipped automatically. Both modes passed the validator: worst adjacent CVD ΔE 9.1 light / 8.4 dark. In light mode the contrast falls below 3:1 — the mitigation is that **every bar carries its own value label**, so identity never rests on colour alone.
 
-**Dashboard ke numbers do alag kism ke hain, aur UI me alag dikhte hain:**
-- **Database figures** — `/api/stats` se live
-- **Eval results** — static constant, aur UI me label bhi lagta hai (`20 questions · gemini-3.5-flash-lite`). Ye 20-question harness minutes leta hai aur din ka zyadatar free quota kha jaata hai; page load pe recompute karna possible hi nahi. Purane numbers ko live jaisa dikhana unhe honestly "recorded result" batane se bura hota.
+**The dashboard numbers are of two different kinds, and the UI shows the difference:**
+- **Database figures** — live, from `/api/stats`
+- **Eval results** — a static constant, labelled as such in the UI (`20 questions · gemini-3.5-flash-lite`). That 20-question harness takes minutes and eats most of a day's free quota; recomputing it on page load is simply not possible. Presenting old numbers as if they were live would be worse than labelling them honestly as a recorded result.
 
-**Dashboard query hard-coded hai, agent se generate nahi hoti.** Dashboard ek fixed report hai, ek sawaal nahi. Agent se banwane ka matlab hota har page load pe ek LLM call, non-deterministic numbers, aur ek panel jo quota khatam hone pe khaali ho jaata.
+**The dashboard query is hard-coded, not generated by the agent.** The dashboard is a fixed report, not a question. Having the agent build it would mean an LLM call on every page load, non-deterministic numbers, and a panel that goes blank when the quota runs out.
 
-**Eval chart ke saath honest reading bhi hai** — chart ke bilkul neeche, kisi doc me dabi hui nahi. Bina uske headline number system ko zyada achha dikhata hai: pehli do conditions me loop kabhi fire hi nahi hua.
+**The eval chart carries its honest reading with it** — directly under the chart, not buried in a doc. Without that the headline number makes the system look better than it is: in the first two conditions the loop never fired at all.
 
-### `result_rows` — API me rows
+### `result_rows` — rows in the API
 
-`execute_sql` ab rows structured shakl me bhi state me daalta hai (`MAX_RESULT_ROWS = 50` tak), taaki UI table dikha sake. Cap isliye hai ki ye rows **checkpointer me likhi jaati hain** — bina cap ke ek "SELECT * FROM employees" poori table ko har conversation checkpoint me daal deta.
+`execute_sql` now also puts the rows into state in structured form (up to `MAX_RESULT_ROWS = 50`), so the UI can show a table. The cap exists because these rows are **written into the checkpointer** — without it, one "SELECT * FROM employees" would put the entire table into every conversation checkpoint.
 
-`_serializable()` Postgres ke `Decimal`/`date` ko JSON-safe banata hai. Ye sirf API ke liye nahi: checkpointer bhi inhe serialize karta hai, to ek naya column type API aur memory dono ko ek saath todta.
+`_serializable()` turns Postgres `Decimal` and `date` values into JSON-safe ones. That is not only for the API: the checkpointer serializes them too, so a new column type would break the API and memory at the same time.
 
 ---
 
 ## backend/app/seed.py — realistic data
 
-**Kyun 10 rows kaafi nahi the.** Purana dataset 10 employees aur 4 departments ka tha, aur usse teen cheezein toot rahi thi:
+**Why 10 rows were not enough.** The old dataset had 10 employees and 4 departments, and three things broke because of it:
 
-- **Dashboard khaali dikhta tha** — chaar bars ka bar chart chart nahi lagta
-- **Koi date column hi nahi tha**, matlab "hiring trend" jaisa sabse natural dashboard sawaal poochha hi nahi ja sakta tha
-- **Joins do table se aage nahi jaate the** — real Text-to-SQL ki dikkat multi-hop join me hai, aur wahi jagah hai jahan model galtiyan karta hai
+- **The dashboard looked empty** — a bar chart with four bars does not read as a chart
+- **There was no date column at all**, so the most natural dashboard question of all — "hiring trend" — could not even be asked
+- **Joins never went past two tables** — the hard part of real Text-to-SQL is the multi-hop join, and that is exactly where models make mistakes
 
-Ab: **8 departments, 160 employees, 10 projects**, hire dates 2020-2025 me faili hui, aur ek teesri table (`projects`) jo `departments` se judti hai.
+Now: **8 departments, 160 employees, 10 projects**, hire dates spread across 2020-2025, and a third table (`projects`) joined through `departments`.
 
-**Random hai, par seeded random hai.** `random.Random(42)` fixed hai, to har machine par bilkul wahi data banta hai. **Ye eval ke liye zaroori hai:** agar seed badalta rehta to accuracy ka har number pichhle run se compare karne layak hi na rehta, aur "self-healing se accuracy badhi" jaisa daawa bemaani ho jaata.
+**It is random, but seeded random.** `random.Random(42)` is fixed, so every machine generates exactly the same data. **This matters for the eval:** if the seed drifted, no accuracy number could be compared with a previous run, and a claim like "self-healing improved accuracy" would mean nothing.
 
-**Salary bands roles se bandhe hain, flat random nahi** — aur manager-level role sirf 10% logon ko milta hai. Isse "average salary" aur "highest paid" alag jawab dete hain; flat random me dono ka jawab shudh sanyog hota.
+**Salary bands are tied to roles rather than flat random** — and a manager-level role goes to only 10% of people. That makes "average salary" and "highest paid" give different answers; with flat random both answers would be pure coincidence.
 
-**Ek comment code se match nahi kar raha tha:** hire-date spread ka multiplier 380 tha, jo ~3 saal deta tha, jabki comment 6 saal kehta tha. Ab 700 hai aur data comment se match karta hai.
+**One comment did not match the code:** the hire-date spread multiplier was 380, giving ~3 years, while the comment claimed 6. It is now 700 and the data matches the comment.
 
 ---
 
 ## backend/app/conversations.py — saved conversations
 
-**Ye ek asli bug theek karta hai, feature nahi jodta.**
+**This fixes a real bug rather than adding a feature.**
 
-Conversation memory Phase 4 me bani aur kaam bhi karti thi — par UI **har page load pe naya `thread_id`** banata tha. Matlab har purani conversation Postgres me padi rehti thi aur pahunch se bahar ho jaati thi. **Data delete nahi ho raha tha, orphan ho raha tha.** Bahar se "refresh pe sab gayab" dikhta tha; andar se ye ek memory feature tha jo apne hi checkpoints kabhi dobara nahi dhoondhta tha.
+Conversation memory was built in Phase 4 and did work — but the UI generated **a fresh `thread_id` on every page load**. That meant every previous conversation stayed in Postgres and became unreachable. **The data was not being deleted, it was being orphaned.** From outside it looked like "everything disappears on refresh"; from inside it was a memory feature that never looked up its own checkpoints again.
 
-**Fix do hisson me hai:**
-1. `thread_id` ab `localStorage` me rehta hai (frontend)
-2. `/api/conversations` list deta hai, `/api/conversations/{id}` ek conversation kholta hai, `DELETE` use hata deta hai
+**The fix has two halves:**
+1. `thread_id` now lives in `localStorage` (frontend)
+2. `/api/conversations` lists them, `/api/conversations/{id}` opens one, and `DELETE` removes one
 
-**Pehla version galat approach pe tha, aur wo seekhne layak hai.** Maine `checkpoint_blobs` ko seedha SQL se padhne ki koshish ki — aur wo **msgpack** me hai, jsonb me nahi. Use haath se decode karna ek andaruni format ko copy karna hota, jo agli library release me chup-chaap toot jaata. **Checkpointer khud jaanta hai ki usne kya likha tha — usi se poochhna chahiye.** Ab thread list SQL se aati hai (sasta, koi deserialization nahi) aur content `saver.get_tuple()` se.
+**The first version took the wrong approach, and that is worth recording.** It tried to read `checkpoint_blobs` directly with SQL — and those are **msgpack**, not jsonb. Decoding it by hand would mean copying an internal format that would break silently on the next library release. **The checkpointer knows what it wrote — so it is the thing to ask.** The thread list now comes from SQL (cheap, no deserialization) and the content from `saver.get_tuple()`.
 
-**Sort `checkpoint->>'ts'` par hai, `thread_id` par nahi** — thread id me timestamp hota to hai, par wo **client banata hai**. Ek alag client alag format bheje to ordering chup-chaap galat ho jaati.
+**Sorting is on the checkpoint timestamp, not on `thread_id`** — the thread id does contain a timestamp, but it is **generated by the client**. A different client sending a different format would silently break the ordering.
 
-**Delete teeno tables se hota hai** (`checkpoints`, `checkpoint_writes`, `checkpoint_blobs`) — sirf ek saaf karne se orphan rows reh jaati, aur wahi haalat dobara ban jaati jo is file ne theek ki.
+**Deletion covers all three tables** (`checkpoints`, `checkpoint_writes`, `checkpoint_blobs`) — clearing only one would leave orphaned rows and recreate exactly the situation this file was written to fix.
 
-**Restored turns alag dikhte hain.** Checkpointed history me sirf question, SQL aur answer hota hai — trace aur rows per-turn state hain aur reset ho jaate hain. Isliye UI "Restored from an earlier session" likhta hai; khaali trace dikhana ye imply karta ki run me koi step tha hi nahi, jabki sach ye hai ki wo rakha nahi gaya.
+**Restored turns look different.** Checkpointed history holds only the question, the SQL and the answer — the trace and the rows are per-turn state and get reset. So the UI says "Restored from an earlier session"; showing an empty trace would imply the run had no steps, when the truth is that they were not retained.

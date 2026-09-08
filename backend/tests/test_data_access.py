@@ -1,14 +1,15 @@
-"""Data access layer ke tests — bina MCP subprocess aur bina database ke.
+"""Tests for the data access layer — with no MCP subprocess and no database.
 
-Jo yahan test hota hai wo **contract** hai: dono raaste (direct driver aur MCP
-tools) caller ko bilkul ek jaisa dikhein. Asli stdio session chalana integration
-hai, unit nahi — aur wo alag se live verify hui hai (dekho `docs/CODE_NOTES.md`).
+What is tested here is the **contract**: both routes (the direct driver and the
+MCP tools) must look identical to the caller. Running a real stdio session is
+integration, not unit — and that was verified live separately (see
+`docs/CODE_NOTES.md`).
 
-Sabse zaroori test yahan `test_mcp_error_becomes_an_exception` hai: self-healing
-loop Postgres ke error text par chalta hai, aur MCP wo error ek success payload
-ke andar bhejta hai. Agar ye layer usko wapas exception me na badle, to MCP on
-karte hi self-healing chup-chaap kaam karna band kar deta — koi crash nahi, bas
-retry kabhi trigger hi nahi hota. Us tarah ke bug sabse mehnge hote hain.
+The most important test here is `test_mcp_error_becomes_an_exception`: the
+self-healing loop runs on Postgres error text, and MCP delivers that error inside
+a success payload. If this layer did not turn it back into an exception, then
+switching MCP on would silently stop self-healing — no crash, the retry simply
+never fires. Bugs of that kind are the most expensive ones.
 """
 
 import json
@@ -19,7 +20,7 @@ import app.data_access as da
 
 
 class FakeClient:
-    """MCP bridge ki jagah — call record karta hai, tay-shuda text lautata hai."""
+    """Stands in for the MCP bridge — records the call, returns fixed text."""
 
     def __init__(self, responses):
         self.responses = responses
@@ -77,22 +78,22 @@ class TestMcpPath:
         assert da.run_sql("SELECT 1") == [{"n": 1}]
 
     def test_schema_is_plain_text_not_json(self, with_mcp):
-        """Ye wahi jagah hai jahan pehla version toota tha.
+        """This is exactly where the first version broke.
 
-        Bridge har result ko JSON maan ke decode karta tha, aur `describe_schema`
-        plain text deta hai. Transport ko har tool ka payload shape nahi pata
-        hona chahiye — wo caller jaanta hai.
+        The bridge decoded every result as JSON, and `describe_schema` returns
+        plain text. The transport should not know the payload shape of each tool
+        — the caller knows that.
         """
         with_mcp({"describe_schema": "Table: employees\nColumns: ..."})
         assert da.get_schema_description().startswith("Table: employees")
 
     def test_mcp_error_becomes_an_exception(self, with_mcp):
-        """**Poore MCP path ka sabse zaroori test.**
+        """**The most important test on the whole MCP path.**
 
-        Server error ko ek successful tool result ke andar bhejta hai, kyunki
-        transport-level exception us message ko hi kha jaata jiski agent ko
-        zaroorat hai. Ye layer usko wapas exception me badalti hai, taaki
-        `execute_sql` ka `except` block dono raaston me ek jaisa chale.
+        The server returns the error inside a successful tool result, because a
+        transport-level exception would swallow the very message the agent needs.
+        This layer turns it back into an exception, so that the `except` block in
+        `execute_sql` behaves identically on both routes.
         """
         msg = 'column "emp_name" does not exist\nHINT: Perhaps you meant "employees.name"'
         with_mcp({"run_select": json.dumps({"ok": False, "error": msg})})
@@ -100,7 +101,7 @@ class TestMcpPath:
         with pytest.raises(da.DataAccessError) as exc:
             da.run_sql("SELECT emp_name FROM employees")
 
-        # HINT bacha rehna chahiye — retry prompt exactly usi par chalta hai.
+        # The HINT must survive — the retry prompt runs on exactly that.
         assert "HINT" in str(exc.value)
         assert "emp_name" in str(exc.value)
 

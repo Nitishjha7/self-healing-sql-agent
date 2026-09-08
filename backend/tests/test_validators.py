@@ -1,8 +1,8 @@
-"""Output guard ke tests.
+"""Tests for the output guard.
 
-Ye validator poori tarah deterministic hai, isliye iske tests bhi — koi LLM, koi
-database, koi mocking nahi. Yahi is design ka poora point hai: prompt me likhi
-gayi baat ek guzarish hai, ye check ek guarantee.
+The validator is entirely deterministic, so these tests are too — no LLM, no
+database, no mocking. That is the whole point of the design: what the prompt asks
+for is a request, this check is a guarantee.
 """
 
 from app.validators import validate_answer
@@ -14,9 +14,9 @@ class TestCleanAnswers:
         assert validate_answer(answer) == (answer, [])
 
     def test_ordinary_words_are_not_flagged(self):
-        """`salary`, `name`, `role`, `budget`, `location` schema me bhi hain aur
-        aam angrezi me bhi. Inhe flag karna har sahi jawab tod deta — yahi ek
-        line is validator ko istemaal ke laayak rakhti hai.
+        """`salary`, `name`, `role`, `budget` and `location` are in the schema and
+        also in ordinary English. Flagging them would break every correct answer
+        — this one line is what keeps the validator usable.
         """
         answer = (
             "Her role is Sales Manager, her name is Neha, the salary is "
@@ -25,8 +25,8 @@ class TestCleanAnswers:
         assert validate_answer(answer) == (answer, [])
 
     def test_the_word_select_alone_is_not_sql(self):
-        """SQL detection ke liye `SELECT` ke saath `FROM` bhi chahiye, warna
-        "you can select any department" jaisa vaakya bhi leak samjha jaata.
+        """SQL detection needs `FROM` alongside `SELECT`, otherwise a sentence
+        like "you can select any department" would be read as a leak.
         """
         answer = "You can select any department to see its headcount."
         assert validate_answer(answer) == (answer, [])
@@ -46,8 +46,8 @@ class TestSchemaLeakage:
         assert "e.salary" not in answer
 
     def test_schema_only_column_is_rewritten(self):
-        """`department_id` aam angrezi me kabhi nahi aata, to ise flag karna safe
-        hai — `salary` jaise shabdon ke ulat.
+        """`department_id` never occurs in ordinary English, so flagging it is
+        safe — unlike words such as `salary`.
         """
         answer, flags = validate_answer("Grouped by department_id.")
         assert flags == ["schema_column_name"]
@@ -63,12 +63,12 @@ class TestSchemaLeakage:
 
 class TestSqlLeakage:
     def test_sql_in_the_answer_replaces_it_entirely(self):
-        """Yahan redact nahi karte, badal dete hain.
+        """This replaces rather than redacts.
 
-        Baaki leaks token-level hain aur nikaale ja sakte hain. Poori query answer
-        me aa jaana matlab synthesizer ne kaam hi galat kiya — usme se tukde kaat
-        kar bacha hua text dikhana user ko ek adhoora, bharosemand-dikhne wala
-        jawab de deta.
+        The other leaks are token-level and can be removed cleanly. A whole query
+        in the answer means the synthesizer did the wrong job entirely — cutting
+        pieces out of it and showing the remainder would hand the user a partial
+        answer that still looks trustworthy.
         """
         answer, flags = validate_answer(
             "SELECT name FROM employees WHERE salary > 80000 returned 4 rows."
@@ -78,8 +78,8 @@ class TestSqlLeakage:
         assert "employees" not in answer
 
     def test_sql_leak_short_circuits_other_checks(self):
-        """SQL leak sabse gambhir hai; jawab waise bhi poora badal jaata hai, to
-        usi text me chhote leaks alag se report karne ka koi matlab nahi.
+        """A SQL leak is the most serious case; the answer is replaced wholesale
+        anyway, so reporting smaller leaks in that same text means nothing.
         """
         _, flags = validate_answer(
             "SELECT employees.salary FROM employees where department_id = 1"

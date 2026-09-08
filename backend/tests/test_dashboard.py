@@ -1,9 +1,9 @@
-"""Dashboard generation ke seams — bina LLM call ke.
+"""The seams of dashboard generation — without an LLM call.
 
-Yahan jo test hota hai wo **widget selection** hai, kyunki wahi ek hissa hai jisme
-judgement nahi, rule hai. Sub-questions banane wala hissa LLM ka kaam hai aur usme
-"sahi jawab" hota hi nahi — uska test likhna model ke ek particular phrasing ko
-pin kar dena hota, jo agle model version pe bina kisi asli bug ke toot jaata.
+What is tested here is **widget selection**, because that is the one part with a
+rule rather than judgement. Planning the sub-questions is the LLM job and has no
+"right answer" — testing it would pin down one particular phrasing of one model,
+and break on the next model version without any real bug.
 """
 
 import pytest
@@ -13,7 +13,7 @@ from app.dashboard import _title, choose_widget
 
 class TestWidgetSelection:
     def test_single_value_is_a_kpi(self):
-        """Ek number ko chart me dikhana decoration hai, information nahi."""
+        """Charting a single number is decoration, not information."""
         assert choose_widget([{"count": 42}]) == "kpi"
 
     def test_few_categories_with_an_additive_number_is_a_donut(self):
@@ -24,12 +24,12 @@ class TestWidgetSelection:
         assert choose_widget(rows) == "donut"
 
     def test_averages_never_become_a_donut(self):
-        """**Ye ek asli bug se aaya test hai.**
+        """**This test came out of a real bug.**
 
-        Pehla version "average salary by department" ko donut de deta tha. Donut
-        kehta hai "ye hisse ek poore ke hain" — par averages jodte nahi; chaar
-        departments ke average salary ka yog kisi cheez ko represent nahi karta.
-        Wo chart data ke baare me ek jhooth bol raha tha.
+        The first version gave "average salary by department" a donut. A donut
+        says "these are parts of a whole" — but averages do not add up; the sum of
+        four departments’ average salaries represents nothing. That chart was
+        telling a lie about the data.
         """
         rows = [
             {"department_name": "Engineering", "average_salary": 101750.0},
@@ -42,32 +42,32 @@ class TestWidgetSelection:
         assert choose_widget(rows) == "bar"
 
     def test_an_ambiguous_measure_falls_back_to_a_bar(self):
-        """Naam se pata na chale to bar — wo hamesha imaandaar rehta hai."""
+        """When the name is not conclusive, use a bar — it is always honest."""
         rows = [{"name": "Engineering", "salary": 101750}]
         assert choose_widget(rows) == "bar"
 
     def test_many_categories_become_a_bar(self):
-        """Chhe se zyada slices par arc lambai se padhna band ho jaata hai aur
-        legend hi chart ban jaata hai — wahan bar imaandaar hai.
+        """Past six slices, arc length stops being readable and the legend
+        becomes the chart — a bar is the honest choice there.
         """
         rows = [{"name": f"D{i}", "n": i} for i in range(8)]
         assert choose_widget(rows) == "bar"
 
     def test_wide_results_stay_a_table(self):
-        """Jo plot nahi hota use plot mat karo."""
+        """Do not plot what does not plot."""
         rows = [{"name": "Aarav", "role": "Engineer", "salary": 95000}]
         assert choose_widget(rows) == "table"
 
     def test_non_numeric_second_column_is_a_table(self):
-        """Do columns kaafi nahi — doosra measure hona chahiye, warna chart ka
-        koi magnitude hi nahi hota.
+        """Two columns is not enough — the second has to be a measure, or the
+        chart has no magnitude to draw.
         """
         rows = [{"name": "Engineering", "location": "Bangalore"}]
         assert choose_widget(rows) == "table"
 
     def test_booleans_are_not_treated_as_numbers(self):
-        """Python me `bool` `int` ka subclass hai. Bina is check ke ek true/false
-        column magnitude ki tarah plot ho jaata.
+        """`bool` is a subclass of `int` in Python. Without this check a
+        true/false column would be plotted as a magnitude.
         """
         rows = [{"name": "Engineering", "is_remote": True}]
         assert choose_widget(rows) == "table"
@@ -89,5 +89,5 @@ class TestTitle:
         assert _title(request_text).startswith(expected_start)
 
     def test_falls_back_to_the_request_itself(self):
-        """Prefix strip ke baad kuch na bache to khaali heading nahi deni."""
+        """If stripping the prefixes leaves nothing, do not return an empty heading."""
         assert _title("salaries") == "Salaries"

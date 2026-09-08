@@ -4,12 +4,12 @@ import { BarChart, DonutChart } from "../components/Charts.jsx";
 import { IconAlert, IconGrid, IconPause, IconSend } from "../components/Icons.jsx";
 
 /**
- * Phase 5 — "Create a dashboard for X" se bana hua dashboard.
+ * Phase 5 — the dashboard built from "Create a dashboard for X".
  *
- * Har widget ek poora agent run hai, isliye har widget apna SQL aur retry count
- * dikha sakta hai. Ye chhupana aasan hota, par tab ye ek aam BI tool jaisa lagta
- * — jabki poora point ye hai ki har tile ke peeche ek generated, self-healed
- * query hai jise dekha ja sakta hai.
+ * Every widget is a full agent run, which is why each one can show its own SQL
+ * and retry count. Hiding that would have been easy, but then this would look
+ * like any other BI tool — when the whole point is that behind every tile there
+ * is a generated, self-healed query you can inspect.
  */
 
 const SUGGESTIONS = [

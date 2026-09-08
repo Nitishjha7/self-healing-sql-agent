@@ -1,13 +1,13 @@
-"""Conversation memory ke seams — bina ek bhi LLM ya Postgres call ke.
+"""The seams of conversation memory — without a single LLM or Postgres call.
 
-**Yahan asli model kyun nahi:** ye tests memory ki *semantics* ka test hain, model
-ki quality ka nahi. Asli sawaal ye hai — kaunsi state turns ke beech carry hoti
-hai aur kaunsi reset. Wo poora sawaal LLM ke bahar hai, aur Gemini ka free tier
-20 requests/day deta hai, to us quota ko un tests pe kharch karna jo usse kuch
-seekh hi nahi rahe, seedha nuksan hai.
+**Why no real model here:** these tests check the *semantics* of memory, not the
+quality of the model. The real question is which state carries between turns and
+which resets. That question lives entirely outside the LLM, and the Gemini free
+tier allows 20 requests/day, so spending that quota on tests that learn nothing
+from it is a straight loss.
 
-Ek asli multi-turn conversation alag se, haath se verify hui hai — wo
-`docs/CODE_NOTES.md` me likhi hai.
+A real multi-turn conversation was verified by hand separately — it is written up
+in `docs/CODE_NOTES.md`.
 """
 
 import app.config as config_mod
@@ -18,20 +18,19 @@ from app.nodes import _append_turn, _format_history
 
 class TestHistoryFormatting:
     def test_empty_history_adds_nothing_to_the_prompt(self):
-        """Pehle turn pe prompt bilkul pehle jaisa rehna chahiye.
+        """On the first turn the prompt must be exactly what it always was.
 
-        Khaali "Earlier in this conversation:" heading bhejna model ko ek aisa
-        context suggest karta hai jo hai hi nahi.
+        Sending an empty "Earlier in this conversation:" heading suggests a
+        context to the model that does not exist.
         """
         assert _format_history([]) == ""
 
     def test_history_carries_sql_not_just_the_answer(self):
-        """SQL hi wo cheez hai jo reference resolve karti hai.
+        """The SQL is what actually resolves the reference.
 
-        "Which department has the highest average salary?" ka angrezi jawab
-        department ka naam bol bhi sakta hai aur nahi bhi; us turn ka SQL
-        (`ORDER BY AVG(salary) DESC LIMIT 1`) hamesha batata hai ki "them"
-        kiski baat hai.
+        The English answer to "Which department has the highest average salary?"
+        may or may not name the department; that turn’s SQL
+        (`ORDER BY AVG(salary) DESC LIMIT 1`) always says what "them" refers to.
         """
         block = _format_history(
             [
@@ -47,7 +46,7 @@ class TestHistoryFormatting:
         assert "Engineering." in block
 
     def test_only_the_last_few_turns_are_sent(self, monkeypatch):
-        """Poori history bhejna tokens aur dhyaan dono kharch karta hai."""
+        """Sending the whole history costs both tokens and attention."""
         monkeypatch.setattr(config_mod, "HISTORY_TURNS_IN_PROMPT", 2)
 
         history = [
@@ -75,26 +74,26 @@ class TestHistoryAppend:
         ]
 
     def test_append_does_not_mutate_the_previous_history(self):
-        """State updates naye objects hone chahiye.
+        """State updates have to be new objects.
 
-        LangGraph checkpointed state ko reuse karta hai; jagah pe mutate karna wo
-        bug hai jo tab dikhta hai jab ek turn rollback ho — tab tak history pehle
-        hi likhi ja chuki hoti hai.
+        LangGraph reuses checkpointed state; mutating in place is the kind of bug
+        that surfaces when a turn rolls back — by which point the history has
+        already been written.
         """
         original = [{"question": "q1", "sql_query": "s1", "answer": "a1"}]
         state = {"question": "q2", "sql_query": "s2", "history": original}
 
         new = _append_turn(state, "a2")
 
-        assert len(original) == 1, "purani list chhedni nahi chahiye"
+        assert len(original) == 1, "the previous list must not be touched"
         assert len(new) == 2
 
     def test_history_grows_by_exactly_one_per_turn(self):
-        """Retry loop me `generate_sql` dobara chalta hai.
+        """`generate_sql` runs again inside the retry loop.
 
-        Isiliye history sirf `synthesize_and_validate` likhta hai — graph ka
-        aakhri node, jo har turn me theek ek baar chalta hai. Beech ke kisi node
-        me append karne se ek retry-heavy turn teen entries banata.
+        That is why only `synthesize_and_validate` writes history — the last node
+        in the graph, which runs exactly once per turn. Appending in any middle
+        node would make a retry-heavy turn produce three entries.
         """
         state = {"question": "q", "sql_query": "s", "history": []}
         after_one = _append_turn(state, "a")
@@ -105,16 +104,16 @@ class TestHistoryAppend:
 
 
 class TestPerTurnReset:
-    """Sabse zaroori invariant — aur wahi jo checkpointer ne naya banaya.
+    """The most important invariant — and the one the checkpointer created.
 
-    Memory se pehle har invocation khaali state se shuru hoti thi, to ye sawaal
-    tha hi nahi. Ab state turns ke beech survive karti hai, aur `run_agent` ka
-    input dict checkpointed state ke **upar merge** hota hai. Jo key us dict me
-    nahi hogi, wo pichhle turn se carry ho jaayegi.
+    Before memory, every invocation started from empty state, so the question did
+    not arise. Now state survives between turns, and the input dict from
+    `run_agent` is **merged over** the checkpointed state. Any key missing from
+    that dict carries over from the previous turn.
     """
 
     def _turn_input_keys(self):
-        """`run_agent` jo per-turn dict banata hai, wahi yahan mirror hai."""
+        """Mirrors the per-turn dict that `run_agent` builds."""
         return {
             "question",
             "sql_query",
@@ -126,37 +125,37 @@ class TestPerTurnReset:
         }
 
     def test_every_per_turn_field_is_reset(self):
-        """`retry_count` carry ho jaye to agla turn turant give-up karega.
+        """If `retry_count` carried over, the next turn would give up immediately.
 
-        Pichhle turn ne agar 3 retries kharch ki, aur `retry_count` reset na ho,
-        to agle turn ka pehla hi error `should_retry` ko `give_up` de dega —
-        self-healing loop chup-chaap mar jaata hai. Trace me bhi pichhle sawaal
-        ki lines dikhengi.
+        If the previous turn spent 3 retries and `retry_count` is not reset, the
+        very first error on the next turn sends `should_retry` to `give_up` — the
+        self-healing loop dies silently. The trace would also show the previous
+        question’s lines.
         """
         import inspect
 
         source = inspect.getsource(graph_mod.run_agent)
         for field in self._turn_input_keys():
-            assert f'"{field}"' in source, f"{field} per-turn reset se chhoot gaya"
+            assert f'"{field}"' in source, f"{field} is missing from the per-turn reset"
 
     def test_history_is_not_reset(self):
-        """`history` ko carry hona *chahiye* — yahi poora feature hai."""
+        """`history` *must* carry over — that is the entire feature."""
         import inspect
 
         source = inspect.getsource(graph_mod.run_agent)
-        # Stateless path me history khaali set hoti hai; memory path me use
-        # chhodna zaroori hai taaki checkpoint se aaye.
+        # The stateless path sets history to empty; the memory path must leave it
+        # out so it comes from the checkpoint.
         assert 'turn_input["history"] = []' in source
         assert "if checkpointer is None:" in source
 
 
 class TestStatelessFallback:
     def test_no_thread_id_means_no_checkpointer(self, monkeypatch):
-        """Bina `thread_id` ke behaviour bilkul pehle jaisa rehna chahiye.
+        """Without a `thread_id` the behaviour must be exactly what it was.
 
-        Eval harness `run_agent(question)` call karta hai. Agar wo chup-chaap
-        memory le lene lage, to pehle eval question ka jawab agle ke score ko
-        badal dega — aur eval ka poora point hi measurement tha.
+        The eval harness calls `run_agent(question)`. If that silently picked up
+        memory, the answer to one eval question would change the score of the next
+        — and measurement was the entire point of the eval.
         """
         called = []
         monkeypatch.setattr(
@@ -174,7 +173,7 @@ class TestStatelessFallback:
 
         graph_mod.run_agent("who works in Bangalore?")
 
-        assert called == [], "thread_id ke bina checkpointer chhuna nahi chahiye"
+        assert called == [], "the checkpointer must not be touched without a thread_id"
         assert captured["config"] is None
         assert captured["state"]["history"] == []
 
@@ -193,5 +192,5 @@ class TestStatelessFallback:
         graph_mod.run_agent("and how many of them are in Bangalore?", thread_id="t-42")
 
         assert captured["config"] == {"configurable": {"thread_id": "t-42"}}
-        # History input me nahi honi chahiye — wo checkpoint se aani chahiye.
+        # History must not be in the input — it has to come from the checkpoint.
         assert "history" not in captured["state"]

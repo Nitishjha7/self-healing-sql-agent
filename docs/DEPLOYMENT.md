@@ -1,64 +1,64 @@
 # Deployment Guide — Render + Neon
 
-Goal: **ek public URL** jo portfolio me daal sako, jo **hamesha kaam kare**, aur **free** ho.
+Goal: **one public URL** you can put in a portfolio, that **always works**, and is **free**.
 
 ---
 
-## ✅ Bacha hua kaam — poori checklist
+## ✅ What is left — the full checklist
 
-Code sab taiyar hai aur locally test ho chuka hai. Ye cheezein manually karni hain:
+The code is ready and has been tested locally. These steps have to be done by hand:
 
-### 1. Deploy karna (~30-40 min) — asli baccha kaam
+### 1. Deploying (~30-40 min) — the actual remaining work
 
-- [ ] Tests pass kar rahe hain: `docker build -f backend/Dockerfile.test -t sql-agent-test backend && docker run --rm sql-agent-test`
-- [ ] **Neon** pe free account → Postgres project → connection string copy (Step 1 neeche)
-- [ ] **Render** pe Web Service → GitHub repo connect → Docker runtime (Step 2)
-- [ ] Environment variables set karna: `DATABASE_URL`, `GOOGLE_API_KEY`, `GEMINI_MODEL`, `RATE_LIMIT_*`
-- [ ] Deploy verify karna — URL kholo, ek question poocho (Step 3)
-- [ ] **UptimeRobot** monitor lagana, 10-minute interval (Step 4) — **ye skip mat karna**, iske bina service so jaayegi
-- [ ] Live URL README me add karna
+- [ ] Tests pass: `docker build -f backend/Dockerfile.test -t sql-agent-test backend && docker run --rm sql-agent-test`
+- [ ] Free account on **Neon** → Postgres project → copy the connection string (Step 1 below)
+- [ ] **Render** → Web Service → connect the GitHub repo → Docker runtime (Step 2)
+- [ ] Set the environment variables: `DATABASE_URL`, `GOOGLE_API_KEY`, `GEMINI_MODEL`, `RATE_LIMIT_*`
+- [ ] Verify the deploy — open the URL, ask a question (Step 3)
+- [ ] Add an **UptimeRobot** monitor on a 10-minute interval (Step 4) — **do not skip this**, without it the service falls asleep
+- [ ] Add the live URL to the README
 
-### 2. LangSmith pe ek trace khud dekhna (5 min) — chhota par zaroori
+### 2. Look at one LangSmith trace yourself (5 min) — small but important
 
-Tracing wired hai (`LANGCHAIN_TRACING_V2=true` + key), lekin **abhi tak ek bhi trace dekha nahi gaya.**
+Tracing is wired (`LANGCHAIN_TRACING_V2=true` plus a key), but **not one trace has actually been looked at yet.**
 
-- [ ] Local `.env` me `LANGCHAIN_TRACING_V2=true` aur `LANGCHAIN_API_KEY` set karo
-- [ ] Ek query chalao jo **actually fail hoke retry kare** — sabse asaan tareeka:
+- [ ] Set `LANGCHAIN_TRACING_V2=true` and `LANGCHAIN_API_KEY` in the local `.env`
+- [ ] Run a query that **actually fails and retries** — the easiest way:
       `docker compose run --rm --no-deps -v "<repo>/eval:/app/eval" backend python -m eval.run_eval --stale-schema --limit 3 --retries 3`
-- [ ] [smith.langchain.com](https://smith.langchain.com) pe project kholo, ek run expand karo
-- [ ] **Retry chain dekho** — har `generate_sql` call, uska rendered prompt injected error ke saath, raw response, latency, tokens
-- [ ] Screenshot le lo (portfolio + interview ke liye)
+- [ ] Open the project on [smith.langchain.com](https://smith.langchain.com) and expand one run
+- [ ] **Look at the retry chain** — each `generate_sql` call, its rendered prompt with the injected error, the raw response, latency, tokens
+- [ ] Take a screenshot (for the portfolio and the interview)
 
-**Kyun zaroori:** interview me "traces dekhta hoon" bolna aur "kaisa dikhta hai?" pe atak jaana bura lagta hai. **Wiring claim karna aur trace padhna do alag cheezein hain.**
+**Why it matters:** saying "I look at traces" in an interview and then freezing on "what does it look like?" is a bad moment. **Wiring something up and reading a trace are two different claims.**
 
-### 3. Guardrails AI validator node (~1 ghanta) — OPTIONAL
+### 3. A Guardrails AI validator node (~1 hour) — OPTIONAL
 
-Abhi safety prompt-level hai, aur ye har doc me honestly likha hai. Iske bina bhi project defendable hai.
+Safety is currently prompt-level, and every doc says so honestly. The project is defendable without this.
 
-- [ ] `guardrails-ai` ko `langchain-core>=0.3` compatible version pe wapas add karna (purana `0.5.10` conflict karta tha — dekho [CODE_NOTES.md](CODE_NOTES.md))
-- [ ] `synthesize_and_validate` ke baad ek alag validator node
-- [ ] Docs me `[Planned]` → `[Implemented]` karna, aur INTERVIEW_NOTES ki honesty checklist se wo entry hataana
+- [ ] Add `guardrails-ai` back at a version compatible with `langchain-core>=0.3` (the old `0.5.10` conflicted — see [CODE_NOTES.md](CODE_NOTES.md))
+- [ ] A separate validator node after `synthesize_and_validate`
+- [ ] Change `[Planned]` → `[Implemented]` in the docs and remove that entry from the honesty checklist in INTERVIEW_NOTES
 
-> **Yahan zyada value nahi hai.** Guardrails is project me bolt-on lagta hai kyunki DB error already deterministic ground truth deta hai. Adaptive CRAG me wo *core feature* hai (grounded answer verify karna) — time hai toh wahan lagao.
+> **There is not much value here.** Guardrails feels bolt-on in this project, because the DB error already provides deterministic ground truth. In Adaptive CRAG it is a *core feature* (verifying a grounded answer) — spend the time there instead.
 
-### 4. Deploy ke baad docs sync karna
+### 4. Sync the docs after deploying
 
-- [ ] README aur ROADMAP me `⬜ Actually deployed` → `✅` karna, live URL ke saath
-- [ ] INTERVIEW_NOTES ki [honesty checklist](INTERVIEW_NOTES.md) padh ke confirm karna ki har claim abhi bhi sach hai
+- [ ] Change `⬜ Actually deployed` → `✅` in the README and ROADMAP, with the live URL
+- [ ] Read the [honesty checklist](INTERVIEW_NOTES.md) in INTERVIEW_NOTES and confirm every claim is still true
 
 ---
 
 | Piece | Host | Notes |
 |---|---|---|
-| App (UI + API, ek service) | **Render** free web service | Docker se deploy, ek hi URL |
-| Database | **Neon** free Postgres | Card nahi chahiye, wake ~500ms |
-| Keep-alive | **UptimeRobot** free | Service ko sone se rokta hai |
+| App (UI + API, one service) | **Render** free web service | Deployed from Docker, a single URL |
+| Database | **Neon** free Postgres | No card needed, wakes in ~500ms |
+| Keep-alive | **UptimeRobot** free | Stops the service from sleeping |
 
 ---
 
-## Architecture — ek service, ek URL
+## Architecture — one service, one URL
 
-Root ka [`Dockerfile`](../Dockerfile) do stages me build karta hai: pehle React app (`npm run build`), phir Python image jisme wo built files `static/` me copy ho jaati hain. FastAPI dono serve karta hai:
+The root [`Dockerfile`](../Dockerfile) builds in two stages: first the React app (`npm run build`), then a Python image into which those built files are copied as `static/`. FastAPI serves both:
 
 ```
 https://self-healing-sql-agent.onrender.com
@@ -68,34 +68,34 @@ https://self-healing-sql-agent.onrender.com
   └─ /health        → same, for uptime pingers
 ```
 
-**Ek service kyun, do nahi:** split deployment me CORS configure karna padta, do jagah deploy karna padta, aur dono ko warm rakhna padta. Same origin se serve karne pe teeno problem khatam. Local `docker-compose` me abhi bhi nginx frontend serve karta hai — `backend/Dockerfile` usi ke liye hai.
+**Why one service and not two:** a split deployment means configuring CORS, deploying in two places, and keeping both warm. Serving from the same origin removes all three problems. Local `docker-compose` still serves the frontend through nginx — `backend/Dockerfile` exists for that.
 
-## ⚠️ Render free tier — ek baat pehle jaan lo
+## ⚠️ Render free tier — one thing to know up front
 
-Render ka free web service **15 minute inactivity ke baad so jaata hai**, aur jagne me **50+ second** lagte hain. Bina fix ke: recruiter link kholega, blank screen dekhega, tab band kar dega.
+A Render free web service **sleeps after 15 minutes of inactivity**, and takes **50+ seconds** to wake. Without a fix: a recruiter opens the link, sees a blank screen, and closes the tab.
 
-**Fix (Step 4):** UptimeRobot har 10 minute `/health` ping karega, toh service kabhi 15 minute idle rahegi hi nahi. Free tier 750 hours/month deta hai — ek service ke liye poora mahina. `/health` deliberately rate limiter se exempt hai, isliye pinger kabhi throttle nahi hoga.
+**The fix (Step 4):** UptimeRobot pings `/health` every 10 minutes, so the service is never idle for 15. The free tier gives 750 hours/month — a full month for one service. `/health` is deliberately exempt from the rate limiter, so the pinger is never throttled.
 
-**Render ka free Postgres mat lena** — wo 30 din baad expire ho jaata hai aur portfolio link chupchaap mar jaayega. Neon use karo.
+**Do not use Render's free Postgres** — it expires after 30 days and the portfolio link dies quietly. Use Neon.
 
 ---
 
 ## Step 1 — Database (Neon)
 
-1. [neon.tech](https://neon.tech) pe free account → naya project (region Singapore, India ke paas).
-2. Connection string copy karo:
+1. Free account on [neon.tech](https://neon.tech) → new project (region Singapore, closest to India).
+2. Copy the connection string:
    ```
    postgresql://user:pass@ep-xxx.ap-southeast-1.aws.neon.tech/neondb?sslmode=require
    ```
-3. Table manually nahi banani — `init_db()` startup pe tables create + seed kar deta hai.
+3. No tables to create by hand — `init_db()` creates and seeds them on startup.
 
-> `?sslmode=require` **mat hataana** — Neon plain connection reject karta hai aur app start hi nahi hoga.
+> **Do not remove** `?sslmode=require` — Neon rejects plain connections and the app will not start.
 
-> **Conversation memory bhi isi database pe chalti hai.** `PostgresSaver` apni checkpoint tables khud bana leta hai (`saver.setup()` startup pe, idempotent) — koi alag service ya migration nahi chahiye. Agar Neon tak pahunch na ho to app crash nahi karti, memory chup-chaap off ho jaati hai aur API `memory_active: false` return karti hai. Deploy ke baad ek follow-up question poochh ke confirm kar lena (Step 3).
+> **Conversation memory runs on this same database.** `PostgresSaver` creates its own checkpoint tables (`saver.setup()` on startup, idempotent) — no separate service or migration needed. If Neon is unreachable the app does not crash; memory switches off quietly and the API returns `memory_active: false`. Confirm it after deploying by asking a follow-up question (Step 3).
 
 ## Step 2 — Deploy (Render)
 
-[dashboard.render.com](https://dashboard.render.com) → **New → Web Service** → GitHub repo connect karo.
+[dashboard.render.com](https://dashboard.render.com) → **New → Web Service** → connect the GitHub repo.
 
 | Setting | Value |
 |---|---|
@@ -106,23 +106,23 @@ Render ka free web service **15 minute inactivity ke baad so jaata hai**, aur ja
 | Region | Singapore |
 | Health Check Path | `/health` |
 
-> Root wala `Dockerfile` chunna hai, `backend/Dockerfile` nahi — wo local compose ke liye hai aur usme frontend build nahi hota.
+> Pick the root `Dockerfile`, not `backend/Dockerfile` — that one is for local compose and does not build the frontend.
 
-**Environment variables** (Render dashboard me):
+**Environment variables** (in the Render dashboard):
 
 | Key | Value |
 |---|---|
-| `DATABASE_URL` | Neon wali string, `?sslmode=require` ke saath |
-| `GOOGLE_API_KEY` | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) se |
+| `DATABASE_URL` | the Neon string, with `?sslmode=require` |
+| `GOOGLE_API_KEY` | from [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
 | `GEMINI_MODEL` | `gemini-3.5-flash-lite` |
 | `RATE_LIMIT_REQUESTS` | `5` |
 | `RATE_LIMIT_WINDOW` | `60` |
 
-`PORT` set **mat** karna — Render khud inject karta hai, aur Dockerfile use padh leta hai.
+Do **not** set `PORT` — Render injects it, and the Dockerfile reads it.
 
-Repo me [`render.yaml`](../render.yaml) bhi hai — Render Blueprint se deploy karna ho toh ye settings automatically aa jaayengi (secrets phir bhi dashboard me daalne honge).
+The repo also has a [`render.yaml`](../render.yaml) — deploying via a Render Blueprint picks these settings up automatically (secrets still have to go in the dashboard).
 
-Deploy hone pe URL milega: `https://self-healing-sql-agent.onrender.com`. Ye URL **permanent hai** — har redeploy pe wahi rehta hai.
+Once deployed you get a URL like `https://self-healing-sql-agent.onrender.com`. That URL is **permanent** — it stays the same across redeploys.
 
 ## Step 3 — Verify
 
@@ -134,28 +134,28 @@ curl -X POST https://YOUR-APP.onrender.com/api/query \
   -d '{"question":"Which department has the highest average salary?"}'
 ```
 
-Phir browser me URL kholo — chat UI aana chahiye. Ek question poocho aur "Show SQL & steps" khol ke trace dekho.
+Then open the URL in a browser — the chat UI should appear. Ask a question and open "Show SQL & steps" to see the trace.
 
-**Conversation memory bhi check karo** (ye deploy pe hi pehli baar test hoti hai, kyunki Neon local Postgres se alag hai):
+**Check conversation memory too** (this is genuinely tested for the first time on the deploy, because Neon is not the local Postgres):
 
-- [ ] "Which department has the highest average salary?" poocho
-- [ ] Phir follow-up: **"how many people work there?"** — agar wo Engineering samajh gaya, memory chal rahi hai
-- [ ] Ya API se: response me `memory_active: true` aana chahiye jab `thread_id` bheja ho
+- [ ] Ask "Which department has the highest average salary?"
+- [ ] Then follow up with **"how many people work there?"** — if it understands Engineering, memory is working
+- [ ] Or via the API: the response should carry `memory_active: true` when a `thread_id` was sent
 
-`memory_active: false` aaye to Render logs me `Checkpointer setup failed` dhundo — zyadatar `DATABASE_URL` ya Neon connection limit ka issue hota hai.
+If `memory_active: false`, look for `Checkpointer setup failed` in the Render logs — it is usually `DATABASE_URL` or a Neon connection limit.
 
-**Approval gate bhi check karo** (ye bhi checkpointer pe depend karta hai, to memory fail hui to ye bhi chup-chaap band ho jaayega):
+**Check the approval gate too** (it also depends on the checkpointer, so if memory failed this is quietly off as well):
 
-- [ ] "Delete all employees from HR" poocho → response me `awaiting_approval: true` aana chahiye aur `final_answer` khaali
-- [ ] UI me approval card dikhna chahiye pending `DELETE` statement ke saath
-- [ ] **Approve** karo → jawab me saaf likha hona chahiye ki rollback hua aur kitni rows par asar padta
-- [ ] Confirm karo ki data waqai nahi badla (`ALLOW_WRITES` off hai)
+- [ ] Ask "Delete all employees from HR" → the response should carry `awaiting_approval: true` with an empty `final_answer`
+- [ ] The UI should show an approval card with the pending `DELETE` statement
+- [ ] **Approve** it → the answer should say plainly that it was rolled back and how many rows it would have affected
+- [ ] Confirm the data really did not change (`ALLOW_WRITES` is off)
 
-## Step 4 — Keep-alive (ye skip mat karna)
+## Step 4 — Keep-alive (do not skip this)
 
-Iske bina baaki sab bekaar hai — service so jaayegi aur demo 50 second leta rahega.
+Without it the rest is pointless — the service sleeps and the demo keeps taking 50 seconds.
 
-1. [uptimerobot.com](https://uptimerobot.com) pe free account.
+1. Free account on [uptimerobot.com](https://uptimerobot.com).
 2. **Add New Monitor**:
 
    | Field | Value |
@@ -165,55 +165,55 @@ Iske bina baaki sab bekaar hai — service so jaayegi aur demo 50 second leta ra
    | URL | `https://YOUR-APP.onrender.com/health` |
    | Monitoring Interval | **10 minutes** |
 
-Render 15 minute idle pe sulaata hai, toh 10-minute ping hamesha aage rehta hai. Bonus: agar app kabhi down ho toh email aa jaayegi — interview se pehle pata chal jaayega.
+Render sleeps after 15 minutes idle, so a 10-minute ping always stays ahead. Bonus: if the app ever goes down you get an email — you find out before an interview does.
 
 ---
 
-## Environment variables — poori list
+## Environment variables — the full list
 
-| Variable | Zaroori? | Default | Notes |
+| Variable | Required? | Default | Notes |
 |---|---|---|---|
 | `DATABASE_URL` | ✅ | localhost | Neon string with `?sslmode=require` |
 | `GOOGLE_API_KEY` | ✅ | — | Gemini key |
-| `GEMINI_MODEL` | — | `gemini-3.5-flash-lite` | Model deprecate ho jaye toh yahan badlo, code me nahi |
+| `GEMINI_MODEL` | — | `gemini-3.5-flash-lite` | If a model is deprecated, change it here, not in the code |
 | `RATE_LIMIT_REQUESTS` | — | `5` | Per IP |
 | `RATE_LIMIT_WINDOW` | — | `60` | Seconds |
-| `ALLOWED_ORIGINS` | — | `*` | Single-service me same-origin hai, isliye zaroorat nahi. Split deploy me frontend origin set karna |
-| `ALLOW_WRITES` | — | `false` | Approved write commit ho ya chala ke rollback ho. **Public demo pe `false` hi rakho** — warna koi bhi visitor `DELETE FROM employees` approve karke table khaali kar sakta hai. `false` pe bhi approval flow poora dikhta hai |
-| `DISABLE_CHECKPOINTER` | — | unset | `1` karo to conversation memory band. Normally chhodo — memory chalne dena hi chahiye. **Dhyan do: isse HITL approval gate bhi band ho jaata hai**, kyunki interrupt ko resume karne ke liye checkpointer chahiye |
-| `CHECKPOINTER_POOL_SIZE` | — | `5` | Neon free tier ki connection limit chhoti hai; 5 se upar mat badhao |
-| `HISTORY_TURNS_IN_PROMPT` | — | `3` | Kitne pichhle turns prompt me jaate hain |
-| `LANGCHAIN_TRACING_V2` | — | `false` | `true` → traces LangSmith pe |
-| `PORT` | — | injected | Render deta hai, khud mat set karna |
+| `ALLOWED_ORIGINS` | — | `*` | Same-origin in the single-service image, so not needed. Set the frontend origin for a split deploy |
+| `ALLOW_WRITES` | — | `false` | Whether an approved write commits or runs and rolls back. **Keep it `false` on a public demo** — otherwise any visitor can approve `DELETE FROM employees` and empty the table. The approval flow is fully visible even at `false` |
+| `DISABLE_CHECKPOINTER` | — | unset | Set to `1` to turn conversation memory off. Normally leave it alone — memory should run. **Note: this also turns off the HITL approval gate**, because resuming an interrupt needs a checkpointer |
+| `CHECKPOINTER_POOL_SIZE` | — | `5` | The Neon free tier connection limit is small; do not raise it above 5 |
+| `HISTORY_TURNS_IN_PROMPT` | — | `3` | How many previous turns go into the prompt |
+| `LANGCHAIN_TRACING_V2` | — | `false` | `true` → traces go to LangSmith |
+| `PORT` | — | injected | Render provides it, do not set it yourself |
 
 ---
 
-## Rate limiting — kyun zaroori hai
+## Rate limiting — why it matters
 
-Public demo pe per-IP rate limit ke bina **API key jal jaayegi.** Gemini free tier poore project ke liye ~15 requests/minute deta hai — sab visitors me shared. Ek bot, ya ek curious recruiter jo 20 questions poochh de, quota khatam kar dega aur uske baad har visitor ko error milega.
+Without a per-IP rate limit on a public demo, **the API key burns out.** The Gemini free tier gives the whole project ~15 requests/minute — shared across every visitor. One bot, or one curious recruiter asking 20 questions, exhausts the quota and everyone after that gets an error.
 
-[`app/ratelimit.py`](../backend/app/ratelimit.py) per-IP sliding window lagata hai (default 5 questions/minute), aur dono `/health` routes exempt hain.
+[`app/ratelimit.py`](../backend/app/ratelimit.py) applies a per-IP sliding window (5 questions/minute by default), and both `/health` routes are exempt.
 
-**Known limitation, honestly:** limiter in-memory hai — restart pe counters reset, aur multi-replica pe har process apna count rakhega. Single-container demo ke liye ye sahi trade-off hai; scale pe Redis chahiye. **Interview me ye khud bolna** — trade-off pata hona hi asli point hai.
+**A known limitation, stated honestly:** the limiter is in-memory — counters reset on restart, and with multiple replicas each process keeps its own count. For a single-container demo that is the right trade-off; at scale it needs Redis. **Say this yourself in an interview** — knowing the trade-off is the actual point.
 
 ---
 
-## Deploy ke baad — checklist
+## After deploying — checklist
 
-- [ ] UptimeRobot monitor chal raha hai (10-min interval)
-- [ ] Rate limit kaam kar raha hai — 6 requests jaldi bhejo, 429 aana chahiye
-- [ ] `.env` commit nahi hui — `git ls-files .env` khaali hona chahiye
-- [ ] Neon connection string kisi commit me nahi hai
-- [ ] README me live URL add kiya
-- [ ] Interview se pehle ek baar URL khol ke check kar lena
+- [ ] The UptimeRobot monitor is running (10-min interval)
+- [ ] Rate limiting works — send 6 requests quickly, expect a 429
+- [ ] `.env` was not committed — `git ls-files .env` should be empty
+- [ ] The Neon connection string is not in any commit
+- [ ] The live URL is in the README
+- [ ] Open the URL once before an interview to check it
 
 ## Troubleshooting
 
-| Problem | Wajah |
+| Problem | Cause |
 |---|---|
-| App start hi nahi hota | `DATABASE_URL` me `?sslmode=require` missing hai |
-| Deploy hota hai par 502 | Render ka `$PORT` bind nahi hua — confirm karo ki root wala `Dockerfile` use ho raha hai |
-| UI khulti hai, query pe 500 | Zyadatar Gemini quota (429 upstream). Render logs dekho |
-| Pehli request 50 sec leti hai | Service so gayi thi — UptimeRobot monitor check karo |
-| UI ki jagah JSON dikhta hai | Galat Dockerfile (`backend/Dockerfile`) select ho gaya — usme frontend build nahi hota |
-| Build fail: frontend not found | Docker build context `.` (repo root) hona chahiye, `backend` nahi |
+| The app never starts | `?sslmode=require` is missing from `DATABASE_URL` |
+| It deploys but returns 502 | Render's `$PORT` was not bound — confirm the root `Dockerfile` is being used |
+| The UI loads but a query 500s | Usually the Gemini quota (429 upstream). Check the Render logs |
+| The first request takes 50 seconds | The service had gone to sleep — check the UptimeRobot monitor |
+| JSON appears instead of the UI | The wrong Dockerfile (`backend/Dockerfile`) was selected — it does not build the frontend |
+| Build fails: frontend not found | The Docker build context must be `.` (repo root), not `backend` |

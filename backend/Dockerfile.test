@@ -1,5 +1,5 @@
-# Test image — LLM-free seams ko bina API key aur bina Postgres ke chalata hai.
-# Is machine pe local Python nahi hai, isliye tests bhi container me chalte hain.
+# Test image — runs the LLM-free seams with no API key and no Postgres.
+# There is no local Python on this machine, so the tests run in a container too.
 FROM python:3.11-slim
 WORKDIR /app
 COPY requirements.txt .
