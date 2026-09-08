@@ -21,6 +21,19 @@
   background: var(--bg);
 }
 
+/* Collapsed rail. The width is animated but nothing inside it is: the labels are
+   unmounted rather than faded, so there is no half-legible text sliding past
+   during the transition. */
+.shell.rail {
+  grid-template-columns: 60px minmax(0, 1fr);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .shell {
+    transition: grid-template-columns 160ms ease;
+  }
+}
+
 /* ============================ sidebar ============================ */
 
 /* The sidebar itself does not scroll — only the conversation list inside it does.
@@ -48,6 +61,71 @@
   gap: 10px;
   padding: 4px 4px 12px;
   border-bottom: 1px solid var(--border-soft);
+}
+
+.brand-text {
+  min-width: 0;
+}
+
+/* Reveals itself on hover of the rail, so it is not a permanently lit control
+   competing with the nav — but it stays visible whenever focused, or the only
+   way to find it by keyboard would be to tab into something invisible. */
+.rail-toggle {
+  margin-left: auto;
+  flex-shrink: 0;
+  opacity: 0;
+  color: var(--muted);
+}
+
+.sidebar:hover .rail-toggle,
+.rail-toggle:focus-visible {
+  opacity: 1;
+}
+
+/* ---------- collapsed rail ---------- */
+
+.sidebar.collapsed {
+  padding: 16px 8px;
+  align-items: center;
+}
+
+/* Mark on top, toggle beneath it: side by side there is no room for both, and
+   the toggle is the one control that must never become unreachable — it is the
+   only way back. */
+.sidebar.collapsed .brand {
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0 12px;
+  width: 100%;
+}
+
+.sidebar.collapsed .rail-toggle {
+  margin-left: 0;
+  /* Always visible here. On a rail of unlabelled glyphs, a control that only
+     appears on hover is a control a new user will not find. */
+  opacity: 1;
+}
+
+.sidebar.collapsed .new-query {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  align-self: center;
+}
+
+.sidebar.collapsed .new-query span,
+.sidebar.collapsed .nav-item span,
+.sidebar.collapsed .nav-badge {
+  display: none;
+}
+
+.sidebar.collapsed .nav {
+  width: 100%;
+}
+
+.sidebar.collapsed .nav-item {
+  justify-content: center;
+  padding: 10px 0;
 }
 
 .brand-mark {
@@ -296,11 +374,15 @@
   letter-spacing: -0.02em;
 }
 
+/* Wide enough that every view's subtitle sits on one line. The cap stays,
+   rather than becoming `nowrap`, so a narrow window wraps the text instead of
+   pushing it under the buttons — one line is the intent here, not a guarantee
+   worth overflowing the header for. */
 .sub {
   margin: 5px 0 0;
   color: var(--muted);
   font-size: 13.5px;
-  max-width: 68ch;
+  max-width: 82ch;
 }
 
 .topbar-actions {
@@ -310,29 +392,9 @@
   flex-wrap: wrap;
 }
 
-.pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12.5px;
-  font-weight: 500;
-  padding: 7px 12px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--panel);
-  color: var(--text-dim);
-}
-
-.pill.ok {
-  color: var(--ok);
-}
-
-.pill .dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: currentColor;
-}
+/* `.pill` lived here for the header's "Connected · PostgreSQL 18" pair. Both
+   facts moved to the status bar, where they are read from the backend instead of
+   typed into a component, and the rule went with them. */
 
 .icon-btn {
   width: 34px;
@@ -1465,18 +1527,55 @@
   /* The sidebar becomes a header row here, so the rows have to be declared:
      `auto` for it and `minmax(0, 1fr)` for everything else, or the main column
      sizes to its content and the status bar is pushed off screen again. */
-  .shell {
+  /* The rail is already a horizontal strip here, so collapsing it has nothing
+     left to give — the width it would save is not the axis under pressure. The
+     toggle is hidden rather than disabled, and a stored `collapsed` from a
+     desktop session is overridden instead of leaving someone on a phone with a
+     rail they cannot expand. */
+  .shell,
+  .shell.rail {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
   }
 
-  .sidebar {
+  .rail-toggle {
+    display: none;
+  }
+
+  .sidebar,
+  .sidebar.collapsed {
     height: auto;
+    padding: 16px 12px;
     flex-direction: row;
     flex-wrap: wrap;
     align-items: center;
     gap: 10px;
     overflow: visible;
+  }
+
+  .sidebar.collapsed .brand {
+    flex-direction: row;
+    width: auto;
+  }
+
+  .sidebar.collapsed .new-query {
+    width: auto;
+    height: auto;
+    padding: 10px 14px;
+  }
+
+  .sidebar.collapsed .new-query span,
+  .sidebar.collapsed .nav-item span {
+    display: inline;
+  }
+
+  .sidebar.collapsed .nav {
+    width: auto;
+  }
+
+  .sidebar.collapsed .nav-item {
+    justify-content: flex-start;
+    padding: 9px 11px;
   }
 
   .side-section,

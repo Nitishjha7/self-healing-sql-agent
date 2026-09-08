@@ -73,6 +73,16 @@ export default function App() {
   const [theme, setTheme] = useState(
     () => localStorage.getItem("theme") || "dark"
   );
+  // Expanded by default: a first-time visitor should see the nav labelled, not
+  // as seven unexplained glyphs. Collapsing is a choice someone makes once they
+  // know the app, so it is remembered.
+  const [railCollapsed, setRailCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem("railCollapsed") === "1";
+    } catch {
+      return false;
+    }
+  });
   const bottomRef = useRef(null);
 
   useEffect(() => {
@@ -84,6 +94,14 @@ export default function App() {
       // applies for this session; only the memory of it is lost.
     }
   }, [theme]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("railCollapsed", railCollapsed ? "1" : "0");
+    } catch {
+      // Same as the theme: it holds for this session, only the memory is lost.
+    }
+  }, [railCollapsed]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -278,7 +296,7 @@ export default function App() {
   const showTrace = view === "chat";
 
   return (
-    <div className="shell">
+    <div className={`shell ${railCollapsed ? "rail" : ""}`}>
       <Sidebar
         view={view}
         onView={setView}
@@ -289,6 +307,8 @@ export default function App() {
         activeThread={threadId}
         onOpen={restore}
         onDelete={removeConversation}
+        collapsed={railCollapsed}
+        onToggle={() => setRailCollapsed((c) => !c)}
       />
 
       <div className="main">

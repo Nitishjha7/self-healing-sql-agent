@@ -161,6 +161,16 @@ export const IconTable = (p) => (
   </Svg>
 );
 
+/* The sidebar toggle. A panel outline with its rail marked, rather than a bare
+   chevron: a chevron alone says "something moves that way" without saying what,
+   and this button sits next to nav items that also move things. */
+export const IconPanelLeft = (p) => (
+  <Svg {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M9 4v16" />
+  </Svg>
+);
+
 export const IconUsers = (p) => (
   <Svg {...p}>
     <path d="M16 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />

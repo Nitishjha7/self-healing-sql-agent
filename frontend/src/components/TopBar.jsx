@@ -15,7 +15,11 @@ import { IconMoon, IconPlus, IconSun } from "./Icons.jsx";
 const TITLES = {
   chat: [
     "Ask a question",
-    "In plain English. The agent writes the SQL, runs it, and repairs it if Postgres rejects it.",
+    // "In plain English" was dropped rather than shortened elsewhere: the title
+    // above already says this is a question box, so the subtitle only has to
+    // explain what happens after you ask. It also brings the line under the
+    // width where it wrapped onto two.
+    "The agent writes the SQL, runs it, and repairs it if Postgres rejects it.",
   ],
   dashboard: [
     "Overview",

@@ -505,6 +505,7 @@ docker compose run --rm --no-deps -v "$PWD/eval:/app/eval" \
 | `POST /api/dashboard/export` | Dashboard → `.pbids` + Power Query scripts |
 | `GET /api/schema` | Columns, row counts, and the exact text the model sees |
 | `GET /api/stats` | Dashboard aggregates |
+| `GET /api/meta` | What this instance is running — model, transport, retry budget, write mode, memory. Feeds the status bar |
 | `GET /health` | Platform healthcheck + uptime ping (outside the rate limiter) |
 
 ### Env vars that change behaviour
