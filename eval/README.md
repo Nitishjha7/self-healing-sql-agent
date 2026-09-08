@@ -51,6 +51,7 @@ On Windows PowerShell, pass the absolute host path to `-v` instead of `$PWD`.
 | `--limit N` | all | Only run the first N questions (smoke test) |
 | `--out PATH` | `eval/results.json` | Where to write full results |
 | `--degrade-schema` | off | Strip the hand-tuned schema hints (see below) |
+| `--stale-schema` | off | Describe the schema with column names that no longer exist. **This is the run where the loop actually fires.** Takes precedence over `--degrade-schema` |
 
 Override the model with `-e GEMINI_MODEL=...`. Quotas are **per model**, so
 switching models gives a fresh daily allowance.
@@ -79,15 +80,30 @@ no example values, no join warning. That is what a schema description looks like
 when it comes from introspection rather than hand-tuning, which is what most real
 deployments actually have.
 
-Running both conditions answers two different questions:
+## `--stale-schema`: the run where the loop actually fires
 
-| Run | Question it answers |
-|---|---|
-| Normal schema, retries 0 vs 3 | Does the loop help when the prompt is already good? |
-| Degraded schema, retries 0 vs 3 | **Does the loop recover accuracy when the prompt is realistic?** |
+Degrading the description turned out **not** to be enough. Removing guidance makes
+the model write queries that are semantically wrong but perfectly valid — `WHERE
+role = 'Manager'` runs fine and returns nothing. No exception, so nothing to heal.
+Measured: 90% with retries off, 90% with them on, average retries 0.00.
 
-The second is the honest test of the architecture. A loop that only helps on a
-prompt you already tuned to death is not doing much work.
+`--stale-schema` instead describes the schema with column names that **no longer
+exist** (`emp_name` where the column is now `name`). That is schema drift, the most
+common way a real Text-to-SQL deployment breaks, and unlike the degraded case it
+produces genuine execution errors carrying a `HINT:` — exactly the feedback the
+retry prompt consumes.
+
+Three conditions, three different questions:
+
+| Run | Question it answers | Result |
+|---|---|---|
+| Normal schema | Does the loop help when the prompt is already good? | +0pp — it never fires |
+| Degraded schema | Does thin guidance make it fire? | +0pp — failures are semantic, not syntactic |
+| **Stale schema** | **Does it recover accuracy when queries genuinely fail?** | **15% → 30%** |
+
+The third is the honest test of the architecture. A loop that only helps on a
+prompt you already tuned to death is not doing much work — and one that never runs
+at all is not being tested.
 
 ## Rate limiting
 
