@@ -402,7 +402,7 @@ Single command: `docker compose up --build`, with secrets injected from `.env` (
 
 ## 9. Future Extensions & Scaling Roadmap
 
-Near-term, interview-focused priorities are in [ROADMAP.md](ROADMAP.md) — multi-table schema, evaluation harness, frontend, deployment. Beyond those:
+The build order and what each phase actually delivered is in [PROJECT_WALKTHROUGH.md](PROJECT_WALKTHROUGH.md). Beyond what is built:
 
 | Phase | Enhancement | Technical Impact |
 |---|---|---|

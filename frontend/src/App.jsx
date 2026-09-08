@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import "./App.css";
 import "./Shell.css";
 import Dashboard from "./Dashboard.jsx";
 import TracePanel from "./TracePanel.jsx";

@@ -1475,3 +1475,135 @@
 .side-del:hover {
   color: var(--err);
 }
+
+/* ============================ approval gate ============================ */
+
+/* Amber, not red: this is a decision point, not a failure. Red would read as
+   "something broke" when the system is working exactly as designed. */
+.bubble.agent.approval {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+}
+
+.approval-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.approval-note {
+  font-size: 12.5px;
+  color: var(--muted);
+  margin: 0;
+}
+
+.approval-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.btn {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+/* The destructive action is the one that carries the weight, so it is the one
+   that looks consequential — the safe choice stays visually quiet. */
+.btn.danger {
+  background: var(--err);
+  border-color: var(--err);
+  color: #fff;
+}
+
+.btn.danger:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ============================ empty state ============================ */
+
+.empty {
+  padding: 28px 0;
+}
+
+.empty-title {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.empty-hint {
+  margin: 14px 0 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Follow-up suggestions sit under the last answer, indented to read as a
+   continuation of the conversation rather than a fresh empty-state prompt. */
+.follow-ups {
+  margin: 4px 0 8px 12px;
+}
+
+/* ============================ typing dots ============================ */
+
+.dots {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+  animation: blink 1.3s infinite ease-in-out;
+}
+
+.dots i:nth-child(2) {
+  animation-delay: 0.18s;
+}
+
+.dots i:nth-child(3) {
+  animation-delay: 0.36s;
+}
+
+@keyframes blink {
+  0%,
+  70%,
+  100% {
+    opacity: 0.25;
+  }
+  35% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dots i {
+    animation: none;
+    opacity: 0.6;
+  }
+}

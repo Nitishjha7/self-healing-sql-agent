@@ -193,11 +193,12 @@ stale enough that queries actually fail, and contributes exactly nothing (95% â†
 95%) when a well-tuned schema description means they never do. Full numbers,
 method, and the failure analysis are in [eval/RESULTS.md](eval/RESULTS.md).
 
-See [docs/SETUP.md](docs/SETUP.md) for the git/repo setup steps, and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) to put it online for free (single Render service + Neon Postgres).
+See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) to put it online for free (single Render service + Neon Postgres).
 
 ## Roadmap
 
-Near-term priorities are in [docs/ROADMAP.md](docs/ROADMAP.md). Longer term:
+Every phase below is built except where marked. The build order, and what each one
+actually delivered, is in [docs/PROJECT_WALKTHROUGH.md](docs/PROJECT_WALKTHROUGH.md).
 
 **Phases 2, 3 and 4 are built.** What each one actually delivered, and what it did not:
 
