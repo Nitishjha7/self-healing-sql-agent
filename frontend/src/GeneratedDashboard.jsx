@@ -1,7 +1,7 @@
 import { useState } from "react";
 import SqlBlock from "./SqlBlock.jsx";
 import { BarChart, DonutChart } from "./Charts.jsx";
-import { IconAlert, IconGrid, IconPause, IconSend, IconTable } from "./Icons.jsx";
+import { IconAlert, IconGrid, IconPause, IconSend } from "./Icons.jsx";
 
 /**
  * Phase 5 — "Create a dashboard for X" se bana hua dashboard.
@@ -329,4 +329,3 @@ function format(v) {
   return String(v);
 }
 
-export { IconTable };
