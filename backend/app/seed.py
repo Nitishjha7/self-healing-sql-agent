@@ -1,19 +1,20 @@
 """Realistic seed data — deterministically generated.
 
-**Kyun 10 rows kaafi nahi the.** Purana dataset 10 employees aur 4 departments ka
-tha, aur usse teen cheezein toot rahi thi:
+**Why 10 rows were not enough.** The old dataset had 10 employees and 4
+departments, and three things broke because of it:
 
-- **Dashboard khaali dikhta tha.** Chaar bars ka bar chart chart nahi lagta.
-- **Koi date column hi nahi tha**, matlab "hiring trend" jaisa sabse natural
-  dashboard sawaal poochha hi nahi ja sakta tha.
-- **Joins do table se aage nahi jaate the.** Real Text-to-SQL ki dikkat multi-hop
-  join me hai — "kis project pe sabse mehnge log lage hain" jaisa sawaal teen
-  tables chhoota hai, aur wahi jagah hai jahan model galtiyan karta hai.
+- **The dashboard looked empty.** A bar chart with four bars does not read as a
+  chart.
+- **There was no date column at all**, so the most natural dashboard question of
+  all — "hiring trend" — could not even be asked.
+- **Joins never went past two tables.** The hard part of real Text-to-SQL is the
+  multi-hop join — a question like "which project has the most expensive people
+  on it" touches three tables, and that is exactly where models make mistakes.
 
-**Random hai, par seeded random hai.** `random.Random(42)` fixed hai, to har
-machine par bilkul wahi data banta hai. Ye eval ke liye zaroori hai: agar seed
-badalta rehta to accuracy ka har number pichhle run se compare karne layak hi na
-rehta, aur "self-healing se accuracy badhi" jaisa daawa bemaani ho jaata.
+**It is random, but seeded random.** `random.Random(42)` is fixed, so every
+machine generates exactly the same data. That matters for the eval: if the seed
+drifted, no accuracy number could be compared with a previous run, and a claim
+like "self-healing improved accuracy" would mean nothing.
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ from __future__ import annotations
 import random
 from datetime import date, timedelta
 
-# Fixed seed. Isko badalna matlab har purana eval number bekaar ho jaana.
+# Fixed seed. Changing it invalidates every previous eval number.
 _rng = random.Random(42)
 
 # (name, budget, location)
@@ -36,9 +37,9 @@ DEPARTMENTS = [
     ("HR", 1_400_000, "Delhi"),
 ]
 
-# Har department ke roles, salary band ke saath. Bands overlap karte hain aur
-# seniority ke saath badhte hain — flat random salary se questions bemaani ho
-# jaate ("highest paid" ka jawab shudh sanyog hota).
+# Roles per department, with a salary band. The bands overlap and rise with
+# seniority — a flat random salary would make the questions meaningless ("highest
+# paid" would be pure coincidence).
 _ROLES = {
     "Engineering": [
         ("Backend Engineer", 70_000, 130_000),
@@ -85,9 +86,9 @@ _ROLES = {
     ],
 }
 
-# Headcount har department ka. Jaan-boojh ke asamaan: Engineering bada, HR chhota
-# — taaki "which department has the most people" ka jawab dilchasp ho, sabka
-# ek jaisa na ho.
+# Headcount per department. Deliberately uneven: Engineering large, HR small — so
+# that "which department has the most people" has an interesting answer rather
+# than a tie.
 _HEADCOUNT = {
     "Engineering": 46,
     "Data Science": 18,
@@ -126,13 +127,13 @@ _TODAY = date(2026, 1, 1)
 
 
 def _name(used: set[str]) -> str:
-    """Unique naam. Duplicates se "who earns most" jaise sawaal ambiguous ho jaate."""
+    """A unique name. Duplicates would make questions like "who earns most" ambiguous."""
     for _ in range(500):
         candidate = f"{_rng.choice(_FIRST)} {_rng.choice(_LAST)}"
         if candidate not in used:
             used.add(candidate)
             return candidate
-    # Naam khatam ho jaayein to suffix — chup-chaap duplicate dene se behtar.
+    # If the names run out, add a suffix — better than silently returning a duplicate.
     return f"{_rng.choice(_FIRST)} {_rng.choice(_LAST)} {len(used)}"
 
 
@@ -144,10 +145,10 @@ def build_employees() -> list[tuple]:
     for dept, count in _HEADCOUNT.items():
         roles = _ROLES[dept]
         for _ in range(count):
-            # Manager-level roles kam hote hain: aakhri role har department me
-            # senior hai, aur wo sirf 10% logon ko milta hai. Isse "average
-            # salary" aur "highest paid" alag jawab dete hain, jo unhe interesting
-            # banata hai.
+            # Manager-level roles are rare: the last role in each department is
+            # the senior one, and only 10% of people get it. That makes "average
+            # salary" and "highest paid" give different answers, which is what
+            # makes them interesting questions.
             if _rng.random() < 0.10:
                 role, low, high = roles[-1]
             else:
@@ -155,13 +156,14 @@ def build_employees() -> list[tuple]:
 
             salary = _rng.randrange(low, high + 1, 500)
 
-            # Hire dates pichhle ~6 saal me faili hui, haal ke saalon me zyada —
-            # ek badhti hui company jaisa. Iske bina hiring-trend chart flat aata.
+            # Hire dates spread over roughly the last 6 years, weighted towards
+            # recent ones — the shape of a growing company. Without that, the
+            # hiring-trend chart comes out flat.
             #
-            # `abs(gauss)` zyadatar 0-3 ke beech rehta hai, isliye multiplier hi
-            # asli spread tay karta hai: 700 se lagbhag 6 saal milte hain. Pehla
-            # version 380 tha aur sirf 3 saal deta tha — comment 6 kehta tha,
-            # data 3 dikhata tha.
+            # `abs(gauss)` mostly lands between 0 and 3, so the multiplier is what
+            # actually sets the spread: 700 gives about 6 years. The first version
+            # used 380 and only produced 3 — the comment said 6 while the data
+            # showed 3.
             days_ago = int(abs(_rng.gauss(0, 1)) * 700) % (6 * 365)
             hire_date = _TODAY - timedelta(days=days_ago + 20)
 
@@ -171,7 +173,7 @@ def build_employees() -> list[tuple]:
 
 
 def build_projects() -> list[tuple]:
-    """(name, department, start_date, status) — teesri table, multi-hop joins ke liye."""
+    """(name, department, start_date, status) — the third table, for multi-hop joins."""
     rows = []
     for name, dept, year, month in _PROJECTS:
         start = date(year, month, 1)

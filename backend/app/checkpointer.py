@@ -1,21 +1,22 @@
-"""Postgres checkpointer — conversation state jo request ke baad bhi zinda rehti hai.
+"""Postgres checkpointer — conversation state that outlives a single request.
 
-**Ye kyun, aur kyun Postgres:** har `/api/query` request ek naya process nahi,
-par ek naya graph invocation zaroor hai. Bina checkpointer ke har invocation
-khaali state se shuru hoti hai, to follow-up question ("unme se kitne Bangalore
-me hain?") ka koi matlab hi nahi banta — agent ko pata hi nahi ki "unme se" kya.
+**Why this exists, and why Postgres:** every `/api/query` is not a new process,
+but it is certainly a new graph invocation. Without a checkpointer each
+invocation starts from empty state, so a follow-up question ("how many of them
+are in Bangalore?") means nothing — the agent has no idea what "them" refers to.
 
-`MemorySaver` bhi ye kaam kar deta, par sirf tab tak jab tak process zinda hai.
-Render pe container 15 min me sota hai; user wapas aake follow-up poochta hai aur
-conversation gayab. Postgres yahan already chal raha hai (isi ka to poora project
-hai), to ek naya service add kiye bina durable checkpointing mil jaati hai.
+`MemorySaver` would also do this, but only for as long as the process lives.
+On Render the container sleeps after 15 minutes; the user comes back, asks a
+follow-up, and the conversation is gone. Postgres is already running here (the
+whole project is built around it), so durable checkpointing costs no extra
+service.
 
-**Optional by design.** `thread_id` ke bina agent bilkul pehle jaisa stateless
-chalta hai — eval harness aur tests isi path pe chalte hain, aur unhe conversation
-memory chahiye bhi nahi (har eval question independent hona chahiye). Agar Postgres
-tak pahunch na ho to app crash nahi karti, memory chup-chaap off ho jaati hai:
-ek chat app ka memory feature down hona ek cheez hai, poori app ka na chalna
-doosri.
+**Optional by design.** Without a `thread_id` the agent runs exactly as it did
+before — stateless. The eval harness and the tests take that path, and they do
+not want conversation memory (every eval question must be independent). If
+Postgres is unreachable the app does not crash; memory just switches off
+quietly: a chat app losing its memory feature is one thing, the whole app
+failing to start is another.
 """
 
 from __future__ import annotations
@@ -31,11 +32,12 @@ _tried = False
 
 
 def get_checkpointer():
-    """Process-wide `PostgresSaver`, ya `None` agar setup na ho paye.
+    """The process-wide `PostgresSaver`, or `None` if it could not be set up.
 
-    Ek hi baar banta hai: `PostgresSaver` ke peeche ek connection pool hai, aur
-    har request pe naya pool kholna connection leak ka sabse seedha raasta hai.
-    Failure bhi ek hi baar log hoti hai — warna har request ek stack trace likhti.
+    Built once: a `PostgresSaver` holds a connection pool behind it, and opening
+    a new pool per request is the most direct route to a connection leak. The
+    failure is logged once too — otherwise every request would write a stack
+    trace.
     """
     global _checkpointer, _tried
 
@@ -59,14 +61,14 @@ def get_checkpointer():
         pool = ConnectionPool(
             conninfo=dsn,
             max_size=int(os.environ.get("CHECKPOINTER_POOL_SIZE", "5")),
-            # autocommit zaroori hai: PostgresSaver har checkpoint write ko apne
-            # aap commit maanta hai. Iske bina writes ek khuli transaction me
-            # latak jaate hain aur agli request unhe dekh hi nahi paati.
+            # autocommit is required: PostgresSaver assumes each checkpoint write
+            # commits itself. Without it, writes hang in an open transaction and
+            # the next request never sees them.
             kwargs={"autocommit": True, "prepare_threshold": 0},
             open=True,
         )
         saver = PostgresSaver(pool)
-        # Tables banata hai agar nahi hain. Idempotent — har start pe safe.
+        # Creates the tables if they are missing. Idempotent — safe on every start.
         saver.setup()
         log.info("Postgres checkpointer ready — conversation memory is on.")
         _checkpointer = saver
@@ -78,6 +80,6 @@ def get_checkpointer():
 
 
 def reset_for_tests() -> None:
-    """Cached checkpointer bhool jao — sirf tests ke liye."""
+    """Forget the cached checkpointer — for tests only."""
     global _checkpointer, _tried
     _checkpointer, _tried = None, False

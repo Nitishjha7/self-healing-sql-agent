@@ -1,21 +1,23 @@
-"""Phase 5 — ek request se poora dashboard banana.
+"""Phase 5 — turning one request into a whole dashboard.
 
-"Create a dashboard showing department-wise salary and headcount" jaisa ek vaakya
-lete hain, use chhote sawaalon me todte hain, har sawaal ko **usi self-healing
-agent** se chalate hain, aur har result ke liye ek widget chunte hain.
+Take a single sentence like "Create a dashboard showing department-wise salary and
+headcount", break it into smaller questions, run each one through **the same
+self-healing agent**, and pick a widget for each result.
 
-**Do faisle jo is file ka dhaancha tay karte hain:**
+**Two decisions shape this entire file:**
 
-1. **Sub-questions LLM banata hai, widgets nahi.** Sawaal me judgement hai — "salary
-   ke baare me kya poochha jaana chahiye" ka koi ek jawab nahi. Widget me judgement
-   nahi hai: ek row ek column ka matlab KPI hai, char categories ka matlab bar hai.
-   Wo data ki **shakl** se tay hota hai, aur uske liye ek aur LLM call lagana ek
-   deterministic faisle ko probabilistic bana dena hai.
+1. **The LLM plans the sub-questions, not the widgets.** The questions involve
+   judgement — there is no single right answer to "what should be asked about
+   salary". The widget does not: one row and one column means a KPI, four
+   categories means a bar. That follows from the **shape** of the data, and
+   spending another LLM call on it would turn a deterministic decision into a
+   probabilistic one.
 
-2. **Har sub-question poore agent se guzarta hai**, kisi chhote raaste se nahi.
-   Matlab retry loop, output guard, approval gate — sab waise ke waise lagte hain.
-   Agar dashboard ka apna alag SQL path hota, to woh sab bypass ho jaata, aur
-   system ke sabse kam dekhe jaane wale raaste par sabse kam safety hoti.
+2. **Every sub-question goes through the full agent**, never a shortcut. That
+   means the retry loop, the output guard and the approval gate all apply exactly
+   as they normally do. If the dashboard had its own SQL path, all of that would
+   be bypassed, and the least-watched route through the system would have the
+   least safety.
 """
 
 from __future__ import annotations
@@ -31,10 +33,10 @@ from app.data_access import get_schema_description
 from app.graph import run_agent
 from app.nodes import _llm
 
-# Ek dashboard me kitne widgets. Har widget ek poora agent run hai (1-2 LLM calls,
-# retry pe aur zyada), aur free tier ~15 requests/minute deta hai. Chaar pe ek
-# dashboard ~6-9 calls leta hai — jo is quota me theek baithta hai. Zyada rakhne
-# se pehla hi dashboard poora quota kha jaata.
+# How many widgets one dashboard may have. Each widget is a full agent run (1-2
+# LLM calls, more when it retries), and the free tier allows ~15 requests/minute.
+# At four, a dashboard costs ~6-9 calls — which fits inside that quota. Any higher
+# and the first dashboard would consume the whole allowance.
 MAX_WIDGETS = int(os.environ.get("DASHBOARD_MAX_WIDGETS", "4"))
 
 _PLANNER_SYSTEM = (
@@ -48,12 +50,12 @@ _PLANNER_SYSTEM = (
 
 
 def _plan(request: str, limit: int) -> list[str]:
-    """Request ko sub-questions me todta hai.
+    """Break the request into sub-questions.
 
-    JSON array maangte hain aur defensively parse karte hain — model kabhi fence
-    ya ek line ki bhoomika laga deta hai. Parse fail ho to khaali list, jise
-    caller ek saaf message me badal deta hai; ek adhoora dashboard dikhane se
-    behtar hai saaf keh dena ki plan nahi ban paaya.
+    A JSON array is requested and parsed defensively — the model sometimes adds a
+    code fence or a one-line preamble. A failed parse returns an empty list, which
+    the caller turns into a clear message; saying plainly that no plan could be
+    made beats showing a half-built dashboard.
     """
     schema = get_schema_description()
     response = _llm().invoke(
@@ -82,26 +84,26 @@ def _plan(request: str, limit: int) -> list[str]:
     return [q.strip() for q in questions if isinstance(q, str) and q.strip()][:limit]
 
 
-# Measure names jo **jodne layak** hain — inka total ek matlab rakhta hai.
+# Measure names that **can be added up** — a total of these means something.
 _ADDITIVE = ("count", "total", "sum", "headcount", "num", "spend", "budget", "payroll")
 
-# Measure names jo jodne layak **nahi** hain. Averages, rates aur percentages ka
-# yog bemaani hota hai.
+# Measure names that **cannot** be added up. Summing averages, rates or
+# percentages is meaningless.
 _NON_ADDITIVE = ("avg", "average", "mean", "median", "rate", "percent", "pct", "ratio")
 
 
 def _is_part_of_whole(column: str) -> bool:
-    """Kya is measure ka total matlab rakhta hai — matlab donut jaayaz hai.
+    """Whether a total of this measure means anything — i.e. whether a donut is honest.
 
-    **Ye check pehle nahi tha, aur pehle hi asli dashboard me bug nikal aaya:**
-    "average salary by department" ko donut mil gaya. Donut kehta hai "ye hisse
-    ek poore ke hain", par averages jodte nahi — chaar departments ke average
-    salary ka yog kisi cheez ko represent nahi karta. Us chart ne data ke baare
-    me ek baat kahi jo sach nahi thi.
+    **This check did not exist at first, and the bug showed up in the very first
+    real dashboard:** "average salary by department" got a donut. A donut says
+    "these are parts of a whole", but averages do not add up — the sum of four
+    departments\u2019 average salaries represents nothing. That chart made a claim
+    about the data that was not true.
 
-    Naam se andaza lagana perfect nahi hai (`salary` akela ambiguous hai), par
-    galat hone par nateeja bar chart hai — jo hamesha imaandaar rehta hai. Donut
-    tabhi milta hai jab wo saaf taur par jodne layak ho.
+    Guessing from the name is not perfect (`salary` on its own is ambiguous), but
+    when it guesses wrong the result is a bar chart — which is always honest. A
+    donut is only used when the measure is clearly additive.
     """
     lowered = column.lower()
     if any(word in lowered for word in _NON_ADDITIVE):
@@ -110,17 +112,17 @@ def _is_part_of_whole(column: str) -> bool:
 
 
 def choose_widget(rows: list[dict]) -> str:
-    """Result set ki shakl se widget chunta hai. Koi LLM nahi — ye judgement nahi hai.
+    """Pick a widget from the shape of the result set. No LLM — this is not judgement.
 
-    Rules, is order me:
+    The rules, in this order:
 
-    - ek row, ek column                       -> `kpi`   (ek number ko chart me dikhana decoration hai)
-    - do column, doosra jodne-layak number, <= 6 rows -> `donut` (ek poore ke hisse)
-    - do column, doosra number                -> `bar`   (categories ki tulna)
-    - baaki sab                               -> `table` (jo plot nahi hota use plot mat karo)
+    - one row, one column                            -> `kpi`   (charting a single number is decoration)
+    - two columns, second additive numeric, <= 6 rows -> `donut` (parts of a whole)
+    - two columns, second numeric                    -> `bar`   (comparing categories)
+    - anything else                                  -> `table` (do not plot what does not plot)
 
-    Donut ke liye 6 ka cap: usse zyada slices par arc lambai se padhna band ho
-    jaata hai aur legend hi chart ban jaata hai — wahan bar imaandaar hai.
+    The cap of 6 for a donut: beyond that, slices stop being readable by arc
+    length and the legend becomes the chart — a bar is the honest choice there.
     """
     if not rows:
         return "empty"
@@ -132,8 +134,8 @@ def choose_widget(rows: list[dict]) -> str:
 
     if len(columns) == 2:
         second = rows[0][columns[1]]
-        # `bool` Python me `int` ka subclass hai — bina is check ke ek true/false
-        # column magnitude ki tarah plot ho jaata.
+        # `bool` is a subclass of `int` in Python — without this check a
+        # true/false column would be plotted as a magnitude.
         numeric = isinstance(second, (int, float)) and not isinstance(second, bool)
         if numeric:
             if len(rows) <= 6 and _is_part_of_whole(columns[1]):
@@ -144,11 +146,11 @@ def choose_widget(rows: list[dict]) -> str:
 
 
 def build_dashboard(request: str, thread_id: Optional[str] = None) -> dict:
-    """Ek request se dashboard banata hai.
+    """Build a dashboard from one request.
 
-    `thread_id` seedha agent ko pass hota hai, to dashboard ke sawaal usi
-    conversation me darj hote hain — baad me "us dashboard me Engineering ka
-    number kya tha?" poochna kaam karta hai.
+    `thread_id` is passed straight through to the agent, so the dashboard\u2019s
+    questions are recorded in the same conversation — asking "what was the
+    Engineering number in that dashboard?" afterwards works.
     """
     questions = _plan(request, MAX_WIDGETS)
     if not questions:
@@ -167,9 +169,9 @@ def build_dashboard(request: str, thread_id: Optional[str] = None) -> dict:
         result = run_agent(question, thread_id=thread_id)
         rows = result.get("result_rows") or []
 
-        # Approval gate ya failure — widget banane ko kuch nahi. Isko chhodne ke
-        # bajaye record karte hain: ek dashboard jisme chupchaap ek kam widget ho,
-        # wo ek dashboard se bura hai jo bata de ki ek sawaal ka jawab nahi mila.
+        # An approval gate or a failure — nothing to build a widget from. Rather
+        # than drop it, record it: a dashboard that silently has one widget fewer
+        # is worse than one that says a question could not be answered.
         if result.get("approval_status") == "pending":
             widgets.append(
                 {
@@ -215,15 +217,15 @@ def build_dashboard(request: str, thread_id: Optional[str] = None) -> dict:
 
 
 def _title(request: str) -> str:
-    """Request ko ek chhote title me badalta hai — bina LLM call ke.
+    """Turn the request into a short title — without an LLM call.
 
-    Ek aur model call sirf heading ke liye lagana quota ka bura istemaal hai, aur
-    heading galat hone ka nuksaan bhi utna hi kam hai. Prefixes hata kar pehla
-    hissa le lete hain.
+    Spending another model call on a heading is a poor use of quota, and getting a
+    heading slightly wrong costs just as little. Strip the prefixes and keep the
+    first clause.
     """
     text = re.sub(
-        # `me` ko alag optional group me rakha hai: "show me ..." aur "give me ..."
-        # dono aate hain, aur use verb ke saath jodne se ek chhoot jaata hai.
+        # `me` is its own optional group: both "show me ..." and "give me ..."
+        # occur, and folding it into the verb would miss one of them.
         r"^(create|make|build|show|give|display)\s+(me\s+)?(a|an|the)?\s*"
         r"(dashboard|report|overview)?\s*(showing|for|of|with|about)?\s*",
         "",

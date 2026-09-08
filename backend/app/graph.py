@@ -36,7 +36,8 @@ def build_graph(checkpointer=None):
 
     graph.set_entry_point("generate_sql")
 
-    # Destructive query approval gate se hoke jaati hai, baaki seedha execute.
+    # A destructive query goes through the approval gate; everything else runs
+    # straight through.
     graph.add_conditional_edges(
         "generate_sql",
         needs_approval,
@@ -58,11 +59,12 @@ def build_graph(checkpointer=None):
     )
     graph.add_edge("synthesize_and_validate", END)
 
-    # **Interrupt sirf checkpointer ke saath.** LangGraph ko pause karke baad me
-    # resume karne ke liye state kahin save karni padti hai — bina checkpointer
-    # ke `interrupt_before` ka koi matlab nahi. Isliye stateless graph purane
-    # hard block pe chalta hai, aur HITL sirf `thread_id` wale path pe milta hai.
-    # Ye Phase 4 ke Phase 3 se pehle aane ka seedha nateeja hai, ittefaq nahi.
+    # **Interrupts only exist with a checkpointer.** Pausing a LangGraph run and
+    # resuming it later means the state has to be saved somewhere — without a
+    # checkpointer `interrupt_before` means nothing. So the stateless graph keeps
+    # the old hard block, and HITL is available only on the `thread_id` path.
+    # That is a direct consequence of Phase 4 landing before Phase 3, not an
+    # accident.
     if checkpointer is not None:
         return graph.compile(
             checkpointer=checkpointer, interrupt_before=["await_approval"]
@@ -70,9 +72,9 @@ def build_graph(checkpointer=None):
     return graph.compile()
 
 
-# Compiled graphs cache. Pehle har request `build_graph()` chalati thi, jo bina
-# checkpointer ke sirf fizool tha — ab galat bhi hota, kyunki checkpointer ke
-# peeche connection pool hai aur har request pe naya pool kholna leak hai.
+# Cache of compiled graphs. Every request used to call `build_graph()`, which was
+# merely wasteful without a checkpointer — with one it would be wrong, because a
+# checkpointer holds a connection pool and opening a new pool per request leaks.
 _graphs: dict = {}
 
 
@@ -84,22 +86,23 @@ def _get_graph(checkpointer=None):
 
 
 def run_agent(question: str, thread_id: Optional[str] = None) -> AgentState:
-    """Ek sawaal chalao. `thread_id` do to wo conversation continue hoti hai.
+    """Run one question. Pass a `thread_id` to continue that conversation.
 
-    `thread_id` ke bina behaviour bilkul pehle jaisa hai — stateless, koi memory
-    nahi. Eval harness aur tests isi path pe chalte hain, aur yahi unke liye sahi
-    hai: har eval question independent hona chahiye, warna pehle sawaal ka jawab
-    agle ka score badal dega.
+    Without a `thread_id` the behaviour is exactly what it was before —
+    stateless, no memory. The eval harness and the tests take that path, and it
+    is the right one for them: every eval question must be independent, or the
+    answer to the first would change the score of the next.
     """
     checkpointer = get_checkpointer() if thread_id else None
     app = _get_graph(checkpointer)
 
-    # **Har naye sawaal pe per-turn fields explicitly reset.** Checkpointer ke
-    # saath ye zaroori hai: LangGraph is dict ko checkpointed state ke upar merge
-    # karta hai, to jo key yahan nahi hai wo pichhle turn se aage carry hoti hai.
-    # `history` jaan-boojh ke chhodi hai — usi ko carry hona chahiye. Baaki sab
-    # reset hona chahiye, warna pichhle turn ki retries agle turn ko turant
-    # "give up" pe dhakel dengi aur trace me purane sawaal ki lines dikhengi.
+    # **Every per-turn field is explicitly reset on a new question.** With a
+    # checkpointer this is essential: LangGraph merges this dict over the
+    # checkpointed state, so any key missing here carries over from the previous
+    # turn. `history` is left out deliberately — that is the one thing that
+    # should carry. Everything else must reset, or the last turn's retries would
+    # push this question straight to "give up" and the trace would show the
+    # previous question's steps.
     turn_input: dict = {
         "question": question,
         "sql_query": "",
@@ -108,13 +111,14 @@ def run_agent(question: str, thread_id: Optional[str] = None) -> AgentState:
         "retry_count": 0,
         "final_answer": "",
         "logs": [],
-        # Pichhle turn ki approval is turn ki write ko authorize na kar de.
+        # One turn's approval must not authorise the next turn's write.
         "approval_status": "",
         "guardrail_flags": [],
         "result_rows": [],
         "row_count": 0,
-        # Gate tabhi hai jab checkpointer hai — interrupt ko state save karne ki
-        # jagah chahiye. Isi se tay hota hai ki model write likh sakta hai ya nahi.
+        # The gate exists only when a checkpointer does — an interrupt needs
+        # somewhere to save state. This is what decides whether the model may
+        # write a modifying statement at all.
         "hitl_enabled": checkpointer is not None,
     }
 
@@ -125,20 +129,20 @@ def run_agent(question: str, thread_id: Optional[str] = None) -> AgentState:
     config = {"configurable": {"thread_id": thread_id}}
     result = app.invoke(turn_input, config=config)
 
-    # Agar graph approval gate pe ruka hai to `invoke` us waqt ki state lauta
-    # deta hai, `final_answer` khaali. Ise "poora ho gaya" maan lena sabse
-    # gumraah karne wala outcome hota: caller ko khaali jawab milta aur pata
-    # bhi nahi chalta ki system uske faisle ka intezaar kar raha hai.
+    # If the graph stopped at the approval gate, `invoke` returns the state as of
+    # that moment, with an empty `final_answer`. Treating that as "finished"
+    # would be the most misleading outcome available: the caller gets a blank
+    # answer and no hint that the system is waiting on their decision.
     if _is_awaiting_approval(app, config):
         return {**result, "approval_status": "pending"}
     return result
 
 
 def _is_awaiting_approval(app, config) -> bool:
-    """Graph approval node se pehle ruka hua hai ya nahi.
+    """Whether the graph is paused just before the approval node.
 
-    `state.next` batata hai ki agla kaun sa node chalega. Interrupt ke baad wahan
-    `await_approval` hota hai — matlab graph gate pe khada hai, andar nahi gaya.
+    `state.next` names the node that will run next. After an interrupt that is
+    `await_approval` — meaning the graph is standing at the gate, not through it.
     """
     try:
         snapshot = app.get_state(config)
@@ -148,11 +152,11 @@ def _is_awaiting_approval(app, config) -> bool:
 
 
 def resume_agent(thread_id: str, approved: bool) -> Optional[AgentState]:
-    """Ruki hui conversation ko insaan ke faisle ke saath aage badhata hai.
+    """Carry a paused conversation forward with the human's decision.
 
-    `None` deta hai agar ye thread approval ka intezaar hi nahi kar raha —
-    caller ke liye ye 409 hai, 500 nahi: request galat nahi hai, bas is waqt
-    lagoo nahi hoti (do baar approve dabana, ya purana tab).
+    Returns `None` when this thread is not waiting for approval at all — for the
+    caller that is a 409, not a 500: the request is not malformed, it just does
+    not apply right now (approve pressed twice, or a stale tab).
     """
     checkpointer = get_checkpointer()
     if checkpointer is None:
@@ -164,9 +168,9 @@ def resume_agent(thread_id: str, approved: bool) -> Optional[AgentState]:
     if not _is_awaiting_approval(app, config):
         return None
 
-    # Faisla state me likho, phir bina naye input ke resume karo. `None` ka matlab
-    # hai "jahan ruke the wahin se chalao" — naya input dene se turn dobara shuru
-    # ho jaata aur ek aur LLM call lag jaati.
+    # Write the decision into state, then resume with no new input. `None` means
+    # "continue from where you stopped" — passing fresh input would restart the
+    # turn and spend another LLM call.
     app.update_state(
         config, {"approval_status": "approved" if approved else "rejected"}
     )

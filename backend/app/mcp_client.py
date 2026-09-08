@@ -1,24 +1,24 @@
-"""MCP client — database ko subprocess me chalte server se tool calls ke through use karta hai.
+"""MCP client — reaches the database through tool calls to a subprocess server.
 
-**Yahan asli engineering problem transport nahi, do duniyaon ka mel hai.** MCP ka
-Python SDK async hai aur stdio session ko ek long-lived `async with` block me
-rakhta hai. Humare graph nodes sync hain (LangGraph ke sync `invoke` pe chalte
-hain, jise FastAPI threadpool me bulata hai). Beech me teen raaste the:
+**The real engineering problem here is not transport, it is bridging two worlds.**
+The MCP Python SDK is async and keeps its stdio session inside a long-lived
+`async with` block. Our graph nodes are sync (they run under the sync `invoke` of
+LangGraph, which FastAPI calls on a threadpool). There were three ways across:
 
-1. **Har call pe `asyncio.run()`** — sabse aasan, aur sabse ghatiya: har SQL
-   query ek naya Python subprocess spawn karti, ~200-300ms sirf process start me.
-2. **Poora stack async karna** — graph nodes, FastAPI handlers, sab. Sahi hai,
-   par ek MCP toggle ke liye poore agent ka rewrite.
-3. **Ek background thread jisme apna event loop ho**, jo session ko zinda rakhe,
-   aur sync callers uspe kaam bhejein. Yahi chuna.
+1. **`asyncio.run()` per call** — easiest, and worst: every SQL query would spawn
+   a fresh Python subprocess, ~200-300ms of pure process startup.
+2. **Make the whole stack async** — graph nodes, FastAPI handlers, everything.
+   Correct, but a rewrite of the entire agent for the sake of one MCP toggle.
+3. **A background thread with its own event loop** that keeps the session alive,
+   with sync callers submitting work to it. This is what was chosen.
 
-Session ek baar khulta hai aur process ke jeevan bhar zinda rehta hai. Sync taraf
-`asyncio.run_coroutine_threadsafe` se call bhejti hai aur result ka intezaar
-karti hai — matlab caller ko ye ehsaas hi nahi hota ki peeche async hai.
+The session opens once and stays alive for the life of the process. The sync side
+submits calls with `asyncio.run_coroutine_threadsafe` and waits for the result -
+so the caller never notices there is an event loop behind it.
 
-**Ye poora file MCP ki asli laagat hai**, aur isi wajah se `USE_MCP` default off
-hai: seedha driver call hamesha tez rahegi. MCP ka faayda speed nahi — ye hai ki
-data access ek **swappable, standard interface** ban jaata hai.
+**This entire file is the real cost of MCP**, and it is why `USE_MCP` defaults to
+off: a direct driver call will always be faster. The benefit of MCP is not speed
+- it is that data access becomes a **swappable, standard interface**.
 """
 
 from __future__ import annotations
@@ -35,8 +35,8 @@ log = logging.getLogger(__name__)
 
 USE_MCP = os.environ.get("USE_MCP", "").lower() in ("1", "true", "yes")
 
-# Server ko module ki tarah chalate hain, path se nahi — isse working directory
-# aur file layout par nirbharta khatam ho jaati hai.
+# The server is launched as a module rather than by path, which removes any
+# dependency on the working directory or the file layout.
 _SERVER_CMD = [sys.executable, "-m", "mcp_server.server"]
 
 _client: Optional["_McpBridge"] = None
@@ -44,11 +44,11 @@ _lock = threading.Lock()
 
 
 class McpUnavailable(RuntimeError):
-    """Session shuru hi nahi ho paayi — caller ko direct driver pe girna chahiye."""
+    """The session never started — the caller should fall back to the direct driver."""
 
 
 class _McpBridge:
-    """Ek background event loop jisme MCP stdio session zinda rehti hai."""
+    """A background event loop that keeps the MCP stdio session alive."""
 
     def __init__(self) -> None:
         self._loop = asyncio.new_event_loop()
@@ -62,8 +62,8 @@ class _McpBridge:
         )
         self._thread.start()
 
-        # Daemon thread isliye ki ye process ko zinda na rakhe. Uvicorn ke band
-        # hone par is session ka bhi khatam ho jaana hi sahi hai.
+        # A daemon thread, so it never keeps the process alive. When uvicorn shuts
+        # down, this session should end with it.
         if not self._ready.wait(timeout=30):
             raise McpUnavailable("MCP server did not start within 30s")
         if self._error:
@@ -72,7 +72,7 @@ class _McpBridge:
     def _run_loop(self) -> None:
         asyncio.set_event_loop(self._loop)
         self._loop.run_until_complete(self._open())
-        # Session khulne ke baad loop chalta rehta hai taaki wo zinda rahe.
+        # Once the session is open the loop keeps running so it stays alive.
         self._loop.run_forever()
 
     async def _open(self) -> None:
@@ -100,21 +100,21 @@ class _McpBridge:
             self._ready.set()
 
     def call(self, tool: str, args: dict[str, Any], timeout: float = 30.0) -> str:
-        """Tool ko sync taraf se bulata hai aur uska text content deta hai.
+        """Call a tool from the sync side and return its text content.
 
-        **Yahan JSON decode jaan-boojh ke nahi hota.** Pehla version karta tha,
-        aur wo `describe_schema` par toot gaya — wo plain text deta hai, JSON
-        nahi. Transport ko ye tay nahi karna chahiye ki har tool ka payload kis
-        shakl me hai; wo caller jaanta hai. Ye layer sirf bytes laati hai.
+        **Nothing is JSON-decoded here, deliberately.** The first version did, and
+        it broke on `describe_schema` — which returns plain text, not JSON. The
+        transport should not decide what shape a tool payload has; the caller
+        knows that. This layer only moves bytes.
         """
         future = asyncio.run_coroutine_threadsafe(
             self._session.call_tool(tool, args), self._loop
         )
         result = future.result(timeout=timeout)
 
-        # MCP tool results content blocks ki list hote hain. Hamare tools ek
-        # hi text block dete hain, par defensively padhte hain: server kabhi
-        # shape badle to yahan saaf error aana chahiye, chup-chaap `None` nahi.
+        # MCP tool results are a list of content blocks. Our tools return a single
+        # text block, but this reads defensively: if the server ever changes shape,
+        # the failure here should be a clear error, not a silent `None`.
         for block in result.content:
             text = getattr(block, "text", None)
             if text is not None:
@@ -123,11 +123,10 @@ class _McpBridge:
 
 
 def get_client() -> Optional["_McpBridge"]:
-    """Process-wide bridge, ya `None` agar MCP off hai ya start nahi ho paaya.
+    """The process-wide bridge, or `None` if MCP is off or failed to start.
 
-    Failure ek hi baar log hoti hai aur uske baad `None` cache ho jaata hai —
-    warna har request ek subprocess spawn karne ki koshish karti aur har baar
-    30 second rukti.
+    The failure is logged once and `None` is cached afterwards, otherwise every
+    request would try to spawn a subprocess and block for 30 seconds each time.
     """
     global _client
 
@@ -144,12 +143,12 @@ def get_client() -> Optional["_McpBridge"]:
         except Exception as exc:  # noqa: BLE001
             log.warning("MCP unavailable (%s) — falling back to the direct driver.", exc)
             _client = None
-            # Dobara koshish na ho isliye toggle yahin off kar dete hain.
+            # Turn the toggle off here so nothing retries.
             globals()["USE_MCP"] = False
     return _client
 
 
 def reset_for_tests() -> None:
-    """Cached bridge bhool jao — sirf tests ke liye."""
+    """Forget the cached bridge — for tests only."""
     global _client
     _client = None

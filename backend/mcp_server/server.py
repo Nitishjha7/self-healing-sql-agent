@@ -1,15 +1,15 @@
-"""MCP server jo is project ka database tools ke roop me expose karta hai.
+"""An MCP server exposing this project’s database as tools.
 
-**Ye alag process me chalta hai**, agent ke saath stdio pipe se baat karta hai.
-Isi baat ka poora point hai: data access ab agent ke andar `import` ki hui cheez
-nahi, ek **protocol ke peeche baithi hui service** hai. Usi agent ko kal kisi aur
-MCP server se joda ja sakta hai — GitHub, filesystem, kisi doosre database — bina
-agent ka ek line badle. Aur ye server bhi kisi doosre MCP client (Claude Desktop,
-koi IDE) se use ho sakta hai, kyunki interface standard hai, hamara khud ka
-banaya hua nahi.
+**It runs in its own process** and talks to the agent over a stdio pipe. That is
+the entire point: data access is no longer something the agent `import`s, it is a
+**service behind a protocol**. The same agent could be pointed at a different MCP
+server tomorrow — GitHub, a filesystem, another database — without changing a
+line of the agent. And this server can equally be used by any other MCP client
+(Claude Desktop, an IDE), because the interface is a standard one rather than
+something we invented.
 
-Chalane ke liye:  python -m mcp_server.server
-Agent ise khud subprocess ki tarah start karta hai — dekho `app/mcp_client.py`.
+To run it:  python -m mcp_server.server
+The agent starts it as a subprocess itself — see `app/mcp_client.py`.
 """
 
 from __future__ import annotations
@@ -20,10 +20,10 @@ from mcp.server.mcpserver import MCPServer
 
 from app.db import get_schema_description, run_sql, run_write
 
-# MCP SDK 2.x me `FastMCP` ka naam `MCPServer` ho gaya. Ye pehli koshish me toota
-# tha, aur wo failure achhi tarah dikhi: client ne fallback lete hue direct
-# driver use kar liya aur wajah log kar di — bilkul waisa hi jaisa design kiya
-# tha. Ek chup-chaap fail hone wala MCP path sabse kharaab nateeja hota.
+# MCP SDK 2.x renamed `FastMCP` to `MCPServer`. This broke on the first attempt,
+# and the failure showed up well: the client fell back to the direct driver and
+# logged the reason — exactly as designed. An MCP path that failed silently would
+# have been the worst outcome.
 mcp = MCPServer("sql-agent-db")
 
 

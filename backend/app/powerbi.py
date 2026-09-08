@@ -1,24 +1,22 @@
-"""Phase 6 — generated dashboard ko Power BI me le jaana.
+"""Phase 6 — taking a generated dashboard into Power BI.
 
-**Ye "Power BI integration" nahi hai, aur use aisa kehna galat hoga.** Power BI
-service me dataset push karne ke liye ek Azure AD app registration, ek tenant, aur
-workspace permissions chahiye — teeno cheezein is project ke paas nahi hain aur
-ek portfolio demo ke liye honi bhi nahi chahiye.
+**This is not "Power BI integration", and calling it that would be wrong.**
+Pushing a dataset into the Power BI service needs an Azure AD app registration, a
+tenant, and workspace permissions — none of which this project has, and none of
+which a portfolio demo should have.
 
-Jo **ban sakta hai aur sach me kaam karta hai** wo export hai: do artifacts jo
-Power BI Desktop seedha khol leta hai.
+What **can** be built, and genuinely works, is an export: two artifacts that Power
+BI Desktop opens directly.
 
-1. **`.pbids`** — Power BI ka apna data-source descriptor. Ise double-click karo,
-   Desktop khud Postgres se connect karne ka prompt de deta hai. Credentials isme
-   **kabhi nahi** jaate; Power BI unhe khud maangta hai aur apne credential store
-   me rakhta hai.
-2. **Power Query (M) script** har widget ke liye — usme wahi SQL hai jo agent ne
-   generate ki thi. Advanced Editor me paste karo aur wo query ek table ban jaati
-   hai.
+1. **`.pbids`** — Power BI\u2019s own data-source descriptor. Double-click it and
+   Desktop prompts to connect to Postgres. Credentials **never** go into this
+   file; Power BI asks for them itself and keeps them in its credential store.
+2. **A Power Query (M) script** per widget — carrying exactly the SQL the agent
+   generated. Paste it into the Advanced Editor and that query becomes a table.
 
-Matlab jo dashboard agent ne banaya, wo Power BI me **live query** ban jaata hai,
-ek jami hui CSV nahi — user wahan filters, relationships, apne visuals sab jod
-sakta hai.
+So the dashboard the agent built becomes a **live query** in Power BI rather than
+a frozen CSV — the user can add filters, relationships and their own visuals on
+top of it.
 """
 
 from __future__ import annotations
@@ -30,11 +28,11 @@ from urllib.parse import urlparse
 
 
 def _connection() -> tuple[str, str]:
-    """`DATABASE_URL` se host:port aur database name nikaalta hai.
+    """Pull host:port and the database name out of `DATABASE_URL`.
 
-    Username/password jaan-boojh ke chhod dete hain. Ye file user ko download
-    hoti hai aur uske disk par rehti hai — usme credentials daalna wahi galti
-    hai jo `.env.example` me API key daalna thi.
+    The username and password are deliberately left out. This file is downloaded
+    by the user and lives on their disk — putting credentials in it would be the
+    same mistake as putting an API key in `.env.example`.
     """
     dsn = os.environ.get("DATABASE_URL", "postgresql://agent:agent@localhost:5432/employees")
     parsed = urlparse(dsn)
@@ -56,9 +54,9 @@ def build_pbids() -> str:
                         "protocol": "postgresql",
                         "address": {"server": server, "database": database},
                     },
-                    # DirectQuery isliye ki dashboard live rahe. Import mode ek
-                    # snapshot bana deta, aur tab Power BI wala dashboard is
-                    # database se chupchaap purana hota jaata.
+                    # DirectQuery so the dashboard stays live. Import mode would
+                    # take a snapshot, and the Power BI dashboard would then drift
+                    # silently out of date with this database.
                     "mode": "DirectQuery",
                 }
             ],
@@ -68,11 +66,11 @@ def build_pbids() -> str:
 
 
 def _safe_name(question: str, index: int) -> str:
-    """Question ko ek Power Query identifier me badalta hai.
+    """Turn a question into a Power Query identifier.
 
-    M me query names me spaces chalte hain par har jagah quote karne padte hain,
-    aur duplicate names chup-chaap ek doosre ko overwrite kar dete hain — isliye
-    index prefix hamesha lagta hai.
+    M allows spaces in query names but then they must be quoted everywhere, and
+    duplicate names silently overwrite one another — which is why the index prefix
+    is always applied.
     """
     words = re.sub(r"[^A-Za-z0-9 ]", "", question).split()[:5]
     stem = "".join(w.capitalize() for w in words) or "Query"
@@ -80,11 +78,11 @@ def _safe_name(question: str, index: int) -> str:
 
 
 def build_m_script(question: str, sql: str, index: int) -> dict:
-    """Ek widget ke liye Power Query M.
+    """Power Query M for one widget.
 
-    SQL ko M string literal me daalne se pehle escape karna zaroori hai: M me
-    `"` ko `""` likha jaata hai. Bina iske ek `WHERE name = 'x'` wali query bhi
-    theek chal jaati, par koi bhi double-quoted identifier script ko tod deta.
+    The SQL must be escaped before it goes into an M string literal: in M a `"` is
+    written as `""`. Without that, a query filtering on a plain string literal
+    would still work, but any double-quoted identifier would break the script.
     """
     server, database = _connection()
     escaped = sql.replace('"', '""')
@@ -100,11 +98,11 @@ def build_m_script(question: str, sql: str, index: int) -> dict:
 
 
 def build_export(dashboard: dict) -> dict:
-    """Generated dashboard ko Power BI artifacts me badalta hai.
+    """Turn a generated dashboard into Power BI artifacts.
 
-    Sirf wahi widgets aate hain jinke paas SQL hai — skipped ya khaali widgets ka
-    export me koi matlab nahi, aur unhe khaali query ki tarah bhejna Power BI me
-    ek toota hua table bana deta.
+    Only widgets that have SQL are included — a skipped or empty widget means
+    nothing in an export, and shipping it as an empty query would produce a broken
+    table in Power BI.
     """
     queries = [
         build_m_script(w["question"], w["sql"], i + 1)

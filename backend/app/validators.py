@@ -1,29 +1,29 @@
-"""Final answer par deterministic output validation.
+"""Deterministic output validation on the final answer.
 
-**Guardrails AI kyun nahi.** Do baar koshish ki, dono baar dependency wall:
-`guardrails-ai<=0.5` `langchain-core<0.3` maangta hai, `>=0.6` `langchain-core>=1.0`
-maangta hai, aur ye project langgraph 0.2 / langchain 0.3 pe hai jise
-`langchain-core<0.4` chahiye. Beech me koi version hai hi nahi. Use karne ke liye
-poora langchain 1.x migration karna padta — jo checkpointer aur graph APIs tod
-deta — sirf ek validator ke liye.
+**Why not Guardrails AI.** Tried twice, hit a dependency wall both times:
+`guardrails-ai<=0.5` requires `langchain-core<0.3`, `>=0.6` requires
+`langchain-core>=1.0`, and this project runs langgraph 0.2 / langchain 0.3 which
+needs `langchain-core<0.4`. There is no version in between. Using it would have
+meant a full langchain 1.x migration — breaking the checkpointer and graph APIs
+— for the sake of one validator.
 
-**Aur yahan deterministic check waise bhi behtar hai.** Schema leakage ek
-*syntactic* baat hai: jawab me `employees.salary` likha hai ya nahi. Ye ek regex
-ka kaam hai, judgement ka nahi. Iske liye ek aur LLM lagana matlab ek
-deterministic check ko probabilistic bana dena — aur us naye LLM ko kaun check
-karega.
+**And a deterministic check is the better fit here anyway.** Schema leakage is a
+*syntactic* property: either the answer contains `employees.salary` or it does
+not. That is a job for a regex, not for judgement. Adding another LLM for it
+would turn a deterministic check into a probabilistic one — and then who checks
+that LLM.
 
-**Jo ye enforce karta hai:**
+**What this enforces:**
 - Qualified identifiers (`employees.salary`, `e.name`, `d.budget`)
-- Schema-specific column names (`department_id`) jo aam angrezi me kabhi nahi aate
-- Answer me ghusi hui SQL
+- Schema-specific column names (`department_id`) that never occur in plain English
+- SQL that leaked into the answer
 
-**Jo ye enforce NAHI karta, aur kyun:** synthesis prompt ye bhi kehta hai ki ek se
-zyada logon ki salary figures na do jab tak compare karne ko na bola ho. Wo rule
-deterministic nahi ho sakta — "Engineering ka average 101750 hai, Sales ka 73000"
-me do figures hain par wo aggregate hain, kisi vyakti ki salary nahi. Dono ko alag
-karne ke liye semantics chahiye, pattern nahi. Us rule ko yahan enforce karne ka
-dikhava karne se behtar hai ye maan lena ki wo abhi prompt-level hi hai.
+**What it deliberately does NOT enforce, and why:** the synthesis prompt also
+says not to give salary figures for more than one person unless asked to
+compare. That rule cannot be made deterministic — "Engineering averages 101750,
+Sales 73000" has two figures, but they are aggregates, not any individual's
+salary. Separating those needs semantics, not a pattern. Rather than pretend to
+enforce it here, it is honest to say that rule stays at the prompt level.
 """
 
 from __future__ import annotations
@@ -33,26 +33,28 @@ import re
 TABLES = ("employees", "departments")
 COLUMNS = ("id", "name", "department_id", "salary", "role", "budget", "location")
 
-# `employees.salary`, `e.name`, `d.budget` — table ya single-letter alias ke saath
-# ek jaana-pehchana column. Generic `\w+\.\w+` jaan-boojh ke nahi liya: wo "e.g."
-# aur har sentence-boundary pe lag jaata. Schema ke asli naamon se pattern banane
-# se false positive lagbhag khatam ho jaate hain.
+# `employees.salary`, `e.name`, `d.budget` — a known column behind a table name
+# or a single-letter alias. A generic `\w+\.\w+` was deliberately avoided: it
+# matches "e.g." and every sentence boundary. Building the pattern from the real
+# schema names removes almost all false positives.
 _QUALIFIED = re.compile(
     r"\b(?:" + "|".join(TABLES) + r"|[a-z])\.(" + "|".join(COLUMNS) + r")\b",
     re.IGNORECASE,
 )
 
-# Sirf wahi column naam jo aam angrezi me nahi aate. `salary`, `name`, `role`,
-# `budget`, `location` bilkul normal shabd hain — unhe flag karna har sahi jawab
-# ko tod dega. Ye line hi is validator ko istemaal ke laayak rakhti hai.
+# Only column names that do not occur in ordinary English. `salary`, `name`,
+# `role`, `budget` and `location` are perfectly normal words — flagging them
+# would break every correct answer. This one line is what keeps the validator
+# usable at all.
 _SCHEMA_ONLY = re.compile(r"\bdepartment_id\b", re.IGNORECASE)
 
 _SQL_FRAGMENT = re.compile(r"\bSELECT\b[\s\S]{0,200}?\bFROM\b", re.IGNORECASE)
 
-# SQL leak pe jawab redact nahi karte, badal dete hain. Baaki leaks token-level
-# hain aur nikaale ja sakte hain; poori query answer me aa jaana matlab
-# synthesizer ne kaam hi galat kiya — usme se tukde kaat kar bacha hua text
-# dikhana user ko ek adhoora, bharosemand-dikhne wala jawab de deta.
+# A SQL leak replaces the answer rather than redacting it. The other leaks are
+# token-level and can be removed cleanly; a whole query in the answer means the
+# synthesizer did the wrong job entirely — cutting pieces out of it and showing
+# the remainder would hand the user a partial answer that still looks
+# trustworthy.
 _SQL_LEAK_REPLACEMENT = (
     "I found the answer, but couldn't phrase it without exposing internal "
     "query details. Please try asking again."
@@ -60,12 +62,12 @@ _SQL_LEAK_REPLACEMENT = (
 
 
 def validate_answer(answer: str) -> tuple[str, list[str]]:
-    """Answer ko saaf karta hai aur jo bhi mila uski list deta hai.
+    """Clean the answer and report everything that was found.
 
-    Redact-and-flag rakha hai, block nahi. Schema naam leak hona low severity hai
-    — ek sahi jawab ko uske liye maar dena user ke liye leak se zyada bura hai.
-    Lekin chup-chaap theek kar dena bhi galat hai: flags API response me jaate
-    hain, taaki ye dikhe ki guard laga tha, na ki sirf maan liya jaaye.
+    Redact-and-flag, not block. A leaked schema name is low severity — killing a
+    correct answer over it is worse for the user than the leak itself. But
+    fixing it silently would be wrong too: the flags travel out in the API
+    response, so it is visible that the guard fired rather than merely assumed.
     """
     flags: list[str] = []
 

@@ -156,18 +156,18 @@ def needs_approval(state: AgentState) -> str:
 
 
 def await_approval(state: AgentState) -> AgentState:
-    """HITL gate. Graph is node se **pehle** rukta hai (`interrupt_before`).
+    """The HITL gate. The graph stops **before** this node (`interrupt_before`).
 
-    Node khud tab chalta hai jab conversation resume hoti hai, matlab tab tak
-    `approval_status` insaan ke faisle se bhar chuka hota hai. Isliye ye node
-    khud kuch poochta nahi — wo faisla record karta hai, taaki trace me dikhe ki
-    ruka kis wajah se aur aage badha kis faisle pe.
+    The node itself only runs once the conversation resumes, by which point
+    `approval_status` already holds the human's decision. So it asks nothing —
+    it records the decision, so the trace shows both what the run paused for and
+    what it resumed on.
 
-    **Ye alag node isliye hai** ki is LangGraph version me dynamic `interrupt()`
-    nahi hai — sirf static `interrupt_before=[...]`. `execute_sql` pe seedha
-    interrupt lagate to har query ruk jaati, sirf destructive nahi. Ek dedicated
-    node banane se pause **conditional** ho jaata hai: routing tay karti hai ki
-    is turn me gate se guzarna hai ya nahi.
+    **It is a separate node** because this LangGraph version has no dynamic
+    `interrupt()`, only static `interrupt_before=[...]`. Putting that on
+    `execute_sql` would pause *every* query, not just destructive ones. A
+    dedicated node makes the pause **conditional**: routing decides whether this
+    turn passes through the gate at all.
     """
     logs = state.get("logs", [])
     decision = state.get("approval_status", "")
@@ -177,8 +177,8 @@ def await_approval(state: AgentState) -> AgentState:
     elif decision == "rejected":
         logs.append("Human rejected the write. Nothing was executed.")
     else:
-        # Yahan pahunchna matlab resume bina faisle ke hua. Chup-chaap chalne
-        # dena sabse kharaab option hai — gate ka poora matlab hi khatam.
+        # Reaching here means the resume arrived without a decision. Silently
+        # proceeding is the worst option — it defeats the entire gate.
         logs.append("Resumed without a decision — treating as rejected.")
         decision = "rejected"
 
@@ -194,10 +194,10 @@ def execute_sql(state: AgentState) -> AgentState:
     sql_query = state["sql_query"]
 
     if is_destructive(sql_query):
-        # Approval mile bina yahan pahunchna sirf stateless mode me hota hai,
-        # jahan checkpointer nahi hai to interrupt bhi possible nahi. Wahan
-        # purana hard block hi sahi behaviour hai — approval prompt dikhana
-        # jise honour hi nahi kiya ja sakta, uska koi matlab nahi.
+        # Arriving here unapproved only happens in stateless mode, where there is
+        # no checkpointer and therefore no possible interrupt. The original hard
+        # block is the right behaviour there: offering an approval prompt that
+        # cannot be honoured is worse than refusing outright.
         if state.get("approval_status") != "approved":
             logs.append("Blocked: query contains a destructive/write keyword.")
             return {
@@ -235,18 +235,18 @@ def execute_sql(state: AgentState) -> AgentState:
 
     try:
         rows = run_sql(sql_query)
-        # Data access mode trace me dikhta hai. MCP on karke bhi kuch alag na
-        # dikhna matlab ye pata hi na chalna ki wo actually chala ya chup-chaap
-        # direct driver pe gir gaya.
+        # The data access mode shows in the trace. Turning MCP on and seeing
+        # nothing change would leave no way to tell whether it actually ran or
+        # silently fell back to the direct driver.
         via = " via MCP tool" if data_access_mode() == "mcp" else ""
         logs.append(f"Execution succeeded{via}, {len(rows)} row(s) returned.")
         return {
             **state,
             "query_result": str(rows),
-            # UI ke liye rows structured shakl me bhi, taaki wo table dikha sake.
-            # Cap isliye ki ye checkpointer me likhi jaati hain aur har response
-            # me jaati hain — ek "SELECT * FROM employees" jaisa sawaal poori
-            # table ko conversation state me daal deta.
+            # Rows in structured form as well, so the UI can render a table. The
+            # cap exists because these are written into the checkpointer and go
+            # out in every response — an unbounded "SELECT * FROM employees" would
+            # put the whole table into the conversation state.
             "result_rows": _serializable(rows[:config.MAX_RESULT_ROWS]),
             "row_count": len(rows),
             "error": "",
@@ -271,12 +271,12 @@ def should_retry(state: AgentState) -> str:
 
 
 def _append_turn(state: AgentState, answer: str) -> List[ConversationTurn]:
-    """History me is turn ka record jodta hai.
+    """Append a record of this turn to the history.
 
-    Sirf yahi ek function history likhta hai — `synthesize_and_validate` graph ka
-    aakhri node hai, to yahan tak pahunchne ka matlab hai turn poora ho chuka.
-    Beech ke nodes me append karna retry loop me ek hi turn ko teen baar likh
-    deta (`generate_sql` retry pe dobara chalta hai).
+    This is the only function that writes history. `synthesize_and_validate` is
+    the graph's last node, so reaching it means the turn is complete. Appending
+    from an earlier node would record the same turn three times in a retry loop,
+    since `generate_sql` runs again on each retry.
     """
     return (state.get("history") or []) + [
         {
@@ -291,10 +291,10 @@ def synthesize_and_validate(state: AgentState) -> AgentState:
     logs = state.get("logs", [])
 
     if state.get("approval_status") == "rejected":
-        # Rejection ko LLM se nahi likhwate. Ye ek policy outcome hai, ek fixed
-        # fact — usko generate karwana matlab model ko ye mauka dena ki wo use
-        # narrate karte hue kuch aur bol de. Yahi galti pehle "removed from the
-        # HR department" wale jhooth me nikli thi.
+        # The rejection is not generated by the LLM. It is a policy outcome and a
+        # fixed fact; generating it would give the model room to say something
+        # else while narrating it. That is exactly the mistake behind the earlier
+        # "removed from the HR department" falsehood.
         answer = (
             "That request was not approved, so nothing was run against the "
             "database. Nothing has been changed."
@@ -312,9 +312,9 @@ def synthesize_and_validate(state: AgentState) -> AgentState:
             f"after {config.MAX_RETRIES} attempts. Last error: {state['error']}"
         )
         logs.append("Giving up after max retries.")
-        # Failed turn bhi history me jaata hai. Chhodne se agla follow-up chup-chaap
-        # ek aise turn ko refer karta jo kabhi hua hi nahi — aur "usme se kitne"
-        # ka jawab pichhle *safal* turn se aata, jo galat ban jaata.
+        # A failed turn goes into history too. Dropping it would let the next
+        # follow-up silently refer to a turn that never happened, and "how many of
+        # them" would resolve against the previous *successful* turn instead.
         return {
             **state,
             "final_answer": answer,
@@ -335,11 +335,11 @@ def synthesize_and_validate(state: AgentState) -> AgentState:
                     # never touched, but the user is told it was — a false
                     # confirmation is its own kind of harm, separate from the write
                     # the guard already prevented.
-                    # Ye line ab conditional hai. Pehle hardcoded thi, aur ALLOW_WRITES
-                    # aane ke baad wo galat direction me jhoot bulwane lagti: ek write
-                    # jo sach me commit ho gaya, use "kuch nahi badla" batati. Guard
-                    # dono taraf lagana padta hai — na jhoothi confirmation, na jhoothi
-                    # tasalli.
+                    # This line is conditional now. It used to be hardcoded, and once
+                    # ALLOW_WRITES existed it started producing the opposite lie — a
+                    # write that genuinely committed reported as "nothing changed".
+                    # The guard has to work in both directions: no false confirmation,
+                    # and no false reassurance.
                     + (
                         "This system runs write statements only after explicit human "
                         "approval. Report exactly what the result says happened — if it "
@@ -366,15 +366,14 @@ def synthesize_and_validate(state: AgentState) -> AgentState:
     )
     logs.append("Synthesized final answer.")
 
-    # Prompt me schema-leakage ki jo baat likhi hai, wo yahan **enforce** hoti
-    # hai. Prompt ek guzarish hai; ye check ek guarantee. Sirf model se keh dena
-    # ki wo column naam na bole, aur maan lena ki usne suna — wo validation nahi,
-    # ummeed hai.
+    # What the prompt says about schema leakage is **enforced** here. The prompt
+    # is a request; this check is the guarantee. Telling the model not to name
+    # columns and assuming it complied is not validation — it is hope.
     answer, flags = validate_answer(response.content)
     if flags:
-        # Chup-chaap theek karke aage badhna galat hoga: leak hua tha ye baat
-        # trace me dikhni chahiye, warna guard ka kaam karna aur guard ka kabhi
-        # zaroorat na padna, dono ek jaise dikhte hain.
+        # Fixing it silently would be wrong: that a leak happened has to be
+        # visible in the trace, or "the guard did something" and "the guard was
+        # never needed" look identical.
         logs.append(f"Output guard rewrote the answer: {', '.join(flags)}.")
 
     return {

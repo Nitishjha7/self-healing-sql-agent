@@ -1,21 +1,20 @@
-"""Ek hi jagah jahan se agent database tak pahunchta hai.
+"""The single place through which the agent reaches the database.
 
-Do raaste hain aur dono ek jaisa dikhte hain:
+There are two routes and they look identical from outside:
 
-- **direct** — `app.db` ko import karke driver ko seedha bulao
-- **mcp** — ek MCP server ko subprocess ki tarah chalao aur tools call karo
+- **direct** — import `app.db` and call the driver straight
+- **mcp** — run an MCP server as a subprocess and call its tools
 
-`graph.py` ko farak nahi padta ki kaunsa chal raha hai. Yahi is layer ka poora
-maqsad hai: Phase 2 ka daawa ye tha ki "data access hard-wired code se badal kar
-ek swappable tool ban jaaye", aur wo daawa tabhi sach hai jab caller ko badalna
-hi na pade.
+`graph.py` does not care which one is active. That is the entire point of this
+layer: the Phase 2 claim was that "data access moves from hard-wired code to a
+swappable tool", and that claim is only true if the caller never has to change.
 
-**Errors dono raaston me ek jaise aane chahiye.** Self-healing loop Postgres ke
-error text par chalta hai — `column "emp_name" does not exist ... HINT: ...` — to
-MCP raasta us message ko transport exception me lapet kar khota nahi. Server
-error ko payload me bhejta hai, aur ye layer usko wapas usi exception me badal
-deti hai jo direct raaste me uthti. Agar aisa na karein to MCP on karte hi
-self-healing chup-chaap kaam karna band kar deta.
+**Errors must look the same on both routes.** The self-healing loop runs on
+Postgres error text — `column "emp_name" does not exist ... HINT: ...` — so the
+MCP route must not lose that message by wrapping it in a transport exception.
+The server returns the error in the payload, and this layer turns it back into
+the same exception the direct route would raise. Without that, switching MCP on
+would silently stop self-healing from working.
 """
 
 from __future__ import annotations
@@ -27,11 +26,11 @@ from app.mcp_client import get_client
 
 
 class DataAccessError(RuntimeError):
-    """Database ne query reject ki. Iska message hi retry prompt ko jaata hai."""
+    """The database rejected the query. This message is what the retry prompt sees."""
 
 
 def mode() -> str:
-    """`"mcp"` ya `"direct"` — trace aur UI me dikhane ke liye."""
+    """`"mcp"` or `"direct"` — shown in the trace and the UI."""
     return "mcp" if get_client() is not None else "direct"
 
 
@@ -50,8 +49,8 @@ def run_sql(query: str) -> list[dict]:
 
     result = json.loads(client.call("run_select", {"query": query}))
     if not result.get("ok"):
-        # Postgres ka message wapas ek exception me — taaki `execute_sql` ka
-        # `except` block dono raaston me bilkul ek jaisa chale.
+        # Postgres's message back into an exception, so that the `except` block
+        # in `execute_sql` behaves identically on both routes.
         raise DataAccessError(result.get("error", "query failed"))
     return result["rows"]
 
