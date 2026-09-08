@@ -190,6 +190,20 @@ def run_sql(query: str):
         return rows
 
 
+def get_server_version() -> str:
+    """The Postgres version the app is actually connected to.
+
+    Asked of the server rather than written into the UI. A hard-coded
+    "PostgreSQL 18" in a status bar is a claim, and it goes quietly false the
+    day the image or the managed instance changes — which is exactly the kind of
+    stale detail nobody notices until someone in an interview asks about it.
+    """
+    with engine.connect() as conn:
+        raw = conn.execute(text("SHOW server_version")).scalar() or ""
+    # Postgres appends build details on some platforms ("18.6 (Debian ...)").
+    return raw.split(" ")[0]
+
+
 def get_schema_overview() -> dict:
     """For the Schema Explorer: columns, row counts, and the exact text the model sees.
 

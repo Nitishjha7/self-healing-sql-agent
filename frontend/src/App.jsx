@@ -3,7 +3,7 @@ import "./Shell.css";
 
 import Sidebar from "./components/Sidebar.jsx";
 import TopBar from "./components/TopBar.jsx";
-import FeatureStrip from "./components/FeatureStrip.jsx";
+import StatusBar from "./components/StatusBar.jsx";
 
 import ChatView from "./chat/ChatView.jsx";
 import Composer from "./chat/Composer.jsx";
@@ -66,6 +66,10 @@ export default function App() {
   const [memoryActive, setMemoryActive] = useState(null);
   const [view, setView] = useState("chat");
   const [saved, setSaved] = useState([]);
+  // `null` while the first request is still in flight, `false` once it has
+  // failed. The status bar draws those two differently — treating "not yet" as
+  // "down" would flash a false alarm on every page load.
+  const [meta, setMeta] = useState(null);
   const [theme, setTheme] = useState(
     () => localStorage.getItem("theme") || "dark"
   );
@@ -99,10 +103,24 @@ export default function App() {
   useEffect(() => {
     refreshSaved();
     restore(threadId, { silent: true });
+    loadMeta();
     // Deliberately once, on mount: `threadId` changes are already handled by the
     // functions that change it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /** What this backend is actually running — for the status bar and the header. */
+  async function loadMeta() {
+    try {
+      const res = await fetch(`${API_BASE}/api/meta`);
+      if (!res.ok) throw new Error(String(res.status));
+      setMeta(await res.json());
+    } catch {
+      // `false`, not `null`: the bar has to be able to say the backend is
+      // unreachable rather than sit on "Connecting" forever.
+      setMeta(false);
+    }
+  }
 
   async function refreshSaved() {
     try {
@@ -323,7 +341,7 @@ export default function App() {
           {showTrace && <TracePanel turn={lastTurn} pending={loading} />}
         </div>
 
-        <FeatureStrip />
+        <StatusBar meta={meta} turn={lastTurn} loading={loading} />
       </div>
     </div>
   );

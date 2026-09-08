@@ -1,9 +1,23 @@
-/* App shell: sidebar, topbar, workspace, trace rail, dashboard, feature strip. */
+/* App shell: sidebar, topbar, workspace, trace rail, dashboard, status bar. */
 
+/* The shell owns exactly one viewport and never scrolls itself. Scrolling
+   belongs to the two panes inside it — the content column and the trace rail —
+   so the sidebar, the header and the status bar hold their positions no matter
+   how long a transcript gets.
+
+   Before this, the whole document scrolled: the status bar sat at the end of the
+   flow, so it was only ever visible on a short conversation and slid away the
+   moment the page filled. A bar that reports what the agent is doing is useless
+   at the bottom of a scroll nobody is at.
+
+   `dvh` after `vh` for mobile browsers, where the visible height changes as the
+   address bar hides and `100vh` overshoots the screen. */
 .shell {
   display: grid;
   grid-template-columns: 264px minmax(0, 1fr);
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
   background: var(--bg);
 }
 
@@ -21,9 +35,10 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
-  position: sticky;
-  top: 0;
-  height: 100vh;
+  /* No longer sticky: the shell is a fixed viewport grid, so this column is
+     already exactly one screen tall. */
+  height: 100%;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -258,8 +273,13 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
+/* The header and the status bar are fixed furniture — only the workspace between
+   them may grow or shrink. Without `flex-shrink: 0` a long transcript squashes
+   them instead of scrolling. */
 .topbar {
   padding: 20px 24px 16px;
   display: flex;
@@ -267,6 +287,7 @@
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
+  flex-shrink: 0;
 }
 
 .topbar h1 {
@@ -375,18 +396,28 @@
   gap: 18px;
   flex: 1;
   min-height: 0;
-  padding: 0 24px;
-  align-items: start;
+  padding: 0 24px 16px;
+  /* `stretch`, not `start`: both columns are their own scroll containers now, so
+     they need the full height of the row to scroll inside. */
+  align-items: stretch;
+  overflow: hidden;
 }
 
 .workspace.full {
   grid-template-columns: minmax(0, 1fr);
 }
 
+/* The page's scroll. `min-height: 0` is what actually allows it — a grid item
+   defaults to `min-height: auto` and refuses to shrink below its content, which
+   pushes the overflow back out to the shell. */
 .content-col {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  /* Room for the scrollbar so it never sits on top of the text. */
+  padding-right: 4px;
 }
 
 .chat {
@@ -669,14 +700,15 @@
 
 /* ============================ trace rail ============================ */
 
+/* Its own scroll container, like the content column. It used to be sticky with a
+   `100vh` cap, which was the workaround for a page that scrolled as one document;
+   with a fixed shell the rail simply fills its grid row. */
 .trace {
   border: 1px solid var(--border);
   border-radius: 14px;
   background: var(--panel);
   padding: 16px;
-  position: sticky;
-  top: 16px;
-  max-height: calc(100vh - 120px);
+  min-height: 0;
   overflow-y: auto;
 }
 
