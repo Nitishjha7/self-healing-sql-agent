@@ -110,3 +110,22 @@ allowance.
 
 Every gold query is validated against the live schema before use — a broken gold
 query would silently corrupt the metric.
+
+## Why the data is synthetic, and what would make this harder
+
+The rows are generated, not imported. `random.Random(42)` is fixed, so every
+machine builds the identical dataset — without that, a change in accuracy between
+runs would be indistinguishable from a change in the data, and comparing the three
+conditions would mean nothing.
+
+The schema is shaped for the task too: `employees` has no department-name column,
+so a join must be inferred. Most public HR datasets are a single flat CSV, which
+would remove the join entirely — and with it the class of error this loop repairs.
+
+**What would genuinely raise the difficulty is a larger schema, not more realistic
+data.** [Spider](https://yale-lily.github.io/spider) is the standard Text-to-SQL
+benchmark and ships labelled gold queries, so this harness would need a loader
+rather than a rewrite — the execution-accuracy metric transfers unchanged. It
+answers the question these three conditions cannot: at thirty-plus tables, does an
+error-informed retry loop still help, or do failures shift from syntactic to
+semantic — valid SQL answering the wrong question — where the loop is blind?

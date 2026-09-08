@@ -409,3 +409,18 @@ Near-term, interview-focused priorities are in [ROADMAP.md](ROADMAP.md) — mult
 | ~~Phase 2~~ | ~~Model Context Protocol (MCP)~~ | ✅ **Done** — `mcp_server/server.py` exposes the database as MCP tools over stdio; `app/data_access.py` picks the transport and `USE_MCP` toggles it. Default off: a direct driver call is always faster, and MCP buys swappability rather than speed. What it does not yet do is talk to a *third-party* MCP server — the point of the protocol is that it could, without the agent changing |
 | ~~Phase 3~~ | ~~Human-in-the-Loop (HITL)~~ | ✅ **Done** — see §4a. Static `interrupt_before` on a dedicated approval node, `/api/approve` to resume, and `ALLOW_WRITES` deciding whether an approved statement commits or runs-and-rolls-back. Still outstanding: the approval is unauthenticated, exactly like `thread_id` — anyone holding the thread id can approve a write on it. Real use needs auth on the approve endpoint, not just on the query |
 | ~~Phase 4~~ | ~~Postgres checkpointer~~ | ✅ **Done** — see §6c. Cross-session conversation memory via LangGraph's persistence layer. Multi-tenant isolation is the part still outstanding: `thread_id` is client-supplied and unauthenticated, so anyone who guesses another thread's id reads that conversation. Fine for a single-user demo, not for multi-tenant use — that needs auth and a per-user namespace on the thread key |
+| **Phase 7** | **Evaluate on Spider** | The most useful thing left, and it is a measurement rather than a feature — see below |
+
+### Phase 7 — the schema-scale question
+
+The honest limit of this system is not data realism but **schema size**. Three tables are small enough that a hand-written description fits comfortably in the prompt, and that description is carrying real weight: it names the join key and states outright that a join is mandatory. Somewhere around thirty tables that stops being possible, and the agent has to *retrieve* the relevant subset of the schema before it can write anything at all.
+
+[Spider](https://yale-lily.github.io/spider) is the standard Text-to-SQL benchmark and ships labelled gold queries, so `eval/run_eval.py` would need a loader rather than a rewrite — the execution-accuracy metric transfers unchanged.
+
+The question it answers is the one §6b cannot: **at that scale, does an error-informed retry loop still help — or do failures shift from syntactic to semantic**, valid SQL answering the wrong question, where the loop is structurally blind? Both outcomes are worth knowing, and the second would be the more interesting result.
+
+### Why the seed data is synthetic
+
+Rows are generated rather than imported, and the eval depends on it. `random.Random(42)` is fixed, so every machine builds the identical 160 employees; without that, a change in accuracy between runs would be indistinguishable from a change in the data, and the three-condition comparison in §6b would mean nothing.
+
+The schema is likewise shaped for the task rather than found. `employees` deliberately carries no department-name column, so a join must be inferred; salary bands are tied to roles and manager roles are rare, so "average salary" and "highest paid" have different answers instead of coinciding. Most public HR datasets are a single flat CSV — importing one would remove the join, and with it the class of error this loop exists to repair. Realistic-looking data would have cost the thing being measured.

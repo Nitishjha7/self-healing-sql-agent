@@ -438,10 +438,40 @@ Deploy ke baad project complete hai. Poori checklist
 > [INTERVIEW_NOTES §16](INTERVIEW_NOTES.md) me hai; aur "koi bhi AI ye bana deta
 > hai" jaise sawaalon ke jawab §10 ke **Credibility** subsection me.
 
-**Iske aage jo ho sakta hai (roadmap, promise nahi):** database-level read-only
-role · approve endpoint pe auth aur per-user thread namespace · bade schema ke liye
-schema retrieval (50 tables ki description prompt me fit nahi hogi) · semantic
-failures ke liye ek alag mechanism, kyunki loop sirf *execution* errors pakadta hai.
+### Iske aage — aur sabse pehle kya
+
+**Spider pe evaluate karna.** Is project ki asli seema data ki realism nahi,
+**schema ka size** hai. Teen tables itni chhoti hain ki hand-written description
+prompt me aaram se fit ho jaati hai — aur wo description bahut kaam kar rahi hai:
+join key batati hai aur saaf likhti hai ki join zaroori hai. Tees tables ke aas-paas
+ye possible hi nahi rehta, aur agent ko pehle **schema retrieval** karna padta hai.
+
+[Spider](https://yale-lily.github.io/spider) Text-to-SQL ka academic benchmark hai
+aur uske **gold queries already labelled hain** — matlab harness ko rewrite nahi,
+sirf ek loader chahiye. Wo us sawaal ka jawab dega jo ye eval nahi de sakta:
+**itne bade schema par bhi retry loop madad karta hai, ya failures syntactic se
+semantic ho jaati hain** (valid SQL, galat sawaal ka jawab) — jahan loop
+structurally andha hai.
+
+> **Ye ek measurement hai, feature nahi.** Isiliye ye baaki sabse upar hai. Aur
+> interview me "maine Spider pe evaluate kiya" bolna kisi bhi naye feature se
+> zyada weight rakhta hai.
+
+**Baaki (roadmap, promise nahi):** database-level read-only role · approve endpoint
+pe auth aur per-user thread namespace · semantic failures ke liye ek alag mechanism,
+kyunki loop sirf *execution* errors pakadta hai.
+
+### Data synthetic kyun hai
+
+Rows generate hoti hain, import nahi — aur ye eval ka aadhaar hai.
+`random.Random(42)` fixed hai, to har machine par wahi 160 employees bante hain.
+Iske bina upar wale numbers alag runs ke beech compare hi nahi kiye ja sakte:
+accuracy me badlaav aur data me badlaav ek jaise dikhte.
+
+Schema bhi task ke liye **banayi** gayi hai, kahin se **li** nahi: `employees` me
+jaanbujh kar department ka naam nahi hai, salary bands roles se bandhe hain, aur
+manager roles kam hain. Zyadatar public HR datasets ek flat CSV hote hain — wo join
+hi hata dete, aur uske saath wo error class bhi jise ye loop repair karta hai.
 
 ---
 
