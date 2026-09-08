@@ -9,11 +9,12 @@ from typing import List, TypedDict
 
 
 def _serializable(rows: list) -> list:
-    """Postgres ke Decimal/date jaise types ko JSON-safe banata hai.
+    """Turn Postgres types like Decimal and date into JSON-safe values.
 
-    `Decimal` ko `float` me isliye badalte hain ki wo JSON me seedha nahi jaata,
-    aur baaki anjaan types ko `str` — checkpointer bhi inhe serialize karta hai,
-    to ek naya column type API aur memory dono ko ek saath todta.
+    `Decimal` becomes `float` because it does not serialize to JSON directly, and
+    anything else unrecognised becomes `str`. The checkpointer serializes these
+    rows too, so an unhandled column type would break the API and conversation
+    memory at the same time.
     """
     from datetime import date, datetime
     from decimal import Decimal
@@ -37,7 +38,7 @@ class ConversationTurn(TypedDict):
 
 
 class AgentState(TypedDict):
-    # --- per-turn: har naye sawaal pe reset hote hain -----------------------
+    # --- per-turn: reset on every new question ------------------------------
     question: str
     sql_query: str
     query_result: str
@@ -47,54 +48,52 @@ class AgentState(TypedDict):
     logs: List[str]
 
     result_rows: List[dict]
-    """Query ki rows, UI table ke liye (`MAX_RESULT_ROWS` tak)."""
+    """The query's rows, for the UI table (up to `MAX_RESULT_ROWS`)."""
 
     row_count: int
-    """Kitni rows actually aayi — `result_rows` cap hone pe bhi sahi count."""
+    """How many rows actually came back — correct even when `result_rows` is capped."""
 
     guardrail_flags: List[str]
-    """Output guard ne is turn me kya pakda (khaali list = kuch nahi).
+    """What the output guard caught this turn (an empty list means nothing).
 
-    Response me jaata hai. Chup-chaap redact karke aage badhne ka matlab hota
-    "guard ne kaam kiya" aur "guard ki kabhi zaroorat hi nahi padi" dono ek jaise
-    dikhna — aur tab pata hi nahi chalta ki guard kaam kar raha hai ya nahi.
+    This goes out in the response. Redacting silently and moving on would make
+    "the guard did something" and "the guard was never needed" look identical —
+    and then there is no way to tell whether the guard works at all.
     """
 
     hitl_enabled: bool
-    """Is turn me approval gate available hai ya nahi.
+    """Whether the approval gate is available on this turn.
 
-    Interrupt ke liye checkpointer chahiye, to HITL sirf `thread_id` wale path pe
-    milta hai. Ye flag `generate_sql` tak wo baat pahunchata hai, kyunki gate hone
-    ya na hone se ye badal jaata hai ki model ko write likhne di jaaye ya nahi.
+    Interrupts need a checkpointer, so HITL only exists on the `thread_id` path.
+    This flag carries that fact to `generate_sql`, because whether a gate exists
+    decides whether the model may write a modifying statement at all.
     """
 
     approval_status: str
-    """HITL gate ki haalat: `""` | `"pending"` | `"approved"` | `"rejected"`.
+    """State of the HITL gate: `""` | `"pending"` | `"approved"` | `"rejected"`.
 
-    Per-turn hai, per-conversation nahi — ek turn ki approval agle turn ki write
-    ko authorize nahi karti. Wahi bug hoti jo `retry_count` ke saath hoti, bas
-    isme nateeja data change hota.
+    Per-turn, not per-conversation — one turn's approval must not authorise the
+    next turn's write. That would be the same bug as carrying `retry_count`
+    forward, except the consequence is changed data.
     """
 
-    # --- per-conversation: turns ke beech zinda rehte hain ------------------
+    # --- per-conversation: survives between turns ---------------------------
     history: List[ConversationTurn]
-    """Pichhle turns, checkpointer ke through carry hote hue.
+    """Prior turns, carried across by the checkpointer.
 
-    **Checkpointer aa jaane ke baad ye batana zaroori ho jaata hai ki kaunsi
-    field kis scope ki hai.** Bina memory ke har invocation khaali state se
-    shuru hoti thi, to sawaal uthta hi nahi tha. Ab state turns ke beech survive
-    karti hai — aur agar `retry_count` ya `logs` bhi survive kar jaayein to
-    pichhle turn ki do retries agle turn ko turant "give up" pe dhakel dengi,
-    aur trace me pichhle sawaal ki lines dikhengi.
+    **Once a checkpointer exists, every field needs a declared scope.** Without
+    memory each invocation started from an empty state, so the question never
+    arose. Now state survives between turns — and if `retry_count` or `logs`
+    survived too, a previous turn's two retries would push the next question
+    straight to "give up", and the trace would show the wrong question's steps.
 
-    Isliye `run_agent` har naye sawaal pe upar wali saari fields explicitly
-    reset karta hai, aur `history` ko chhodta hai. Yahi ek line ye tay karti hai
-    ki memory feature hai ya bug.
+    So `run_agent` explicitly resets every field above on each new question and
+    leaves only `history` to be restored. That single decision is the difference
+    between a memory feature and a memory bug.
 
-    Reducer (`Annotated[..., operator.add]`) jaan-boojh ke nahi lagaya: nodes
-    `{**state, ...}` return karte hain, to har node poori history wapas bhejta
-    hai — additive reducer use har baar dobara jod deta aur history exponentially
-    badhti. Overwrite semantics ke saath sirf `synthesize_and_validate` isme ek
-    turn add karta hai, ek hi jagah, ek hi baar.
+    There is deliberately **no** additive reducer (`Annotated[..., operator.add]`):
+    nodes return `{**state, ...}`, so each one already returns the whole history,
+    and an additive reducer would re-append it at every node and grow the list
+    exponentially. With overwrite semantics exactly one place appends exactly one
+    turn — `synthesize_and_validate`.
     """
-

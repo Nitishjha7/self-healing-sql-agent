@@ -1,48 +1,48 @@
 """Environment-driven configuration.
 
-Separate from `state.py` because these are settings, not shape — and because
-two of them are **changed at runtime**: the eval harness sweeps `MAX_RETRIES`
-to measure what the self-healing loop contributes, and the tests flip
-`ALLOW_WRITES` to check both sides of the approval gate. Node code therefore
-reads them as `config.MAX_RETRIES` rather than importing the values, so a patch
-on this module is actually seen.
+Separate from `state.py` because these are settings, not shape — and because two
+of them are **changed at runtime**: the eval harness sweeps `MAX_RETRIES` to
+measure what the self-healing loop contributes, and the tests flip `ALLOW_WRITES`
+to check both sides of the approval gate. Node code therefore reads them as
+`config.MAX_RETRIES` rather than importing the values, so a patch on this module
+is actually seen.
 
-Every one of these is an environment variable rather than a literal, and each
-had a reason. `GEMINI_MODEL` especially: Google retired two model ids during
-this project's life, and a hard-coded model name is a time bomb in any LLM app.
+Every one of these is an environment variable rather than a literal, and each had
+a reason. `GEMINI_MODEL` especially: Google retired two model ids during this
+project's life, and a hard-coded model name is a time bomb in any LLM app.
 """
 
 import os
 
-# Eval harness isko 0 set karke measure karta hai ki self-healing loop ke bina
-# accuracy kitni girti hai.
+# The eval harness sets this to 0 to measure how far accuracy falls without the
+# self-healing loop.
 MAX_RETRIES = int(os.environ.get("MAX_RETRIES", "3"))
 
-# Model versions deprecate hote rehte hain, aur eval me alag models compare
-# karne ke liye bhi kaam aata hai.
+# Model ids get retired, and being able to compare models is useful in the eval.
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
 BLOCKED_KEYWORDS = ("DROP", "DELETE", "UPDATE", "INSERT", "ALTER", "TRUNCATE")
 
-# Approved write ko sach me commit karna hai ya nahi.
+# Whether an approved write is actually committed.
 #
-# `false` (default) pe approved query phir bhi **chalti** hai — Postgres use plan
-# karta hai, constraints check karta hai, affected rows batata hai — aur phir
-# rollback ho jaati hai. Isse approval flow public demo pe bhi dikhaya ja sakta
-# hai bina kisi visitor ko `DELETE FROM employees` chalane ki taakat diye.
+# Left `false` (the default) an approved statement still **runs** — Postgres plans
+# it, enforces every constraint, and reports the rows it would have touched — and
+# is then rolled back. That is what makes the approval flow demonstrable on a
+# public deployment without handing any visitor the ability to run
+# `DELETE FROM employees`.
 #
-# Ye "approval ka dikhava" nahi hai: user ko response me saaf likha jaata hai ki
-# rollback hua aur kitni rows par asar padta. Jhoot bolna aur cheez hai, safe
-# mode me chalana aur.
+# This is not approval theatre: the response says plainly that the statement was
+# rolled back and how many rows it would have affected. Running in a safe mode and
+# saying so is a different thing from claiming an action happened.
 ALLOW_WRITES = os.environ.get("ALLOW_WRITES", "").lower() in ("1", "true", "yes")
 
-# Ek conversation me kitne pichhle turns prompt me bhejne hain. Poori history
-# bhejna do tarah se mehnga hai — tokens, aur dhyaan: bees turn purani baat
-# aksar current sawaal se koi rishta nahi rakhti, par model use context maan ke
-# usme se entities utha leta hai. Teen follow-up chain ke liye kaafi hai.
+# How many prior turns to render into the prompt. Sending everything is expensive
+# in two ways — tokens, and attention: a twenty-turn-old exchange usually has
+# nothing to do with the current question, yet the model treats it as context and
+# lifts entities out of it. Three is enough for a chain of follow-ups.
 HISTORY_TURNS_IN_PROMPT = int(os.environ.get("HISTORY_TURNS_IN_PROMPT", "3"))
 
-# UI ko dikhane ke liye kitni rows bhejni hain. Ye rows checkpointer me likhi
-# jaati hain, to bina cap ke ek "SELECT * FROM employees" poori table ko har
-# conversation checkpoint me daal deta.
+# How many rows to hand back for display. These rows are written into the
+# checkpointer, so without a cap a single "SELECT * FROM employees" would put the
+# whole table into every conversation checkpoint.
 MAX_RESULT_ROWS = 50

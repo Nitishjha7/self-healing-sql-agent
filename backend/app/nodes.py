@@ -10,6 +10,7 @@ the eval harness and the tests patch them at runtime — a `from config import
 MAX_RETRIES` would bind the number once at import and quietly ignore the patch.
 """
 
+import os
 import re
 from typing import List
 
@@ -18,8 +19,8 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 from app import config
 
-# Data access ek layer ke peeche hai (direct driver ya MCP tools) — nodes ko
-# farak nahi padta kaunsa chal raha hai. Dekho app/data_access.py.
+# Data access sits behind a layer (direct driver or MCP tools) — the nodes do
+# not care which is running. See app/data_access.py.
 from app.data_access import get_schema_description, run_sql, run_write
 from app.data_access import mode as data_access_mode
 from app.state import AgentState, ConversationTurn, _serializable
@@ -35,24 +36,24 @@ def _llm() -> ChatGoogleGenerativeAI:
 
 
 def _extract_sql(text: str) -> str:
-    """LLM response se sirf SQL nikaalta hai (agar ```sql fenced block ho toh usme se)."""
+    """Pull just the SQL out of an LLM response, unwrapping a ```sql fence if present."""
     match = re.search(r"```(?:sql)?\s*(.*?)```", text, re.DOTALL | re.IGNORECASE)
     sql = match.group(1) if match else text
     return sql.strip().rstrip(";")
 
 
 def _format_history(history: List[ConversationTurn]) -> str:
-    """Pichhle turns ko prompt ke ek block me badalta hai.
+    """Render prior turns into a block for the prompt.
 
-    **Sirf checkpointer se follow-up kaam nahi karte.** Checkpointer state ko
-    durable banata hai; par jab tak wo state prompt me nahi jaati, model ke liye
-    "unme se kitne Bangalore me hain?" ek adhoora vaakya hai. Memory = durable
-    state **+** us state ka prompt me pahunchna. Dono chahiye.
+    **A checkpointer alone does not make follow-ups work.** It makes state
+    durable, but until that state reaches the prompt, "how many of them are in
+    Bangalore?" is an incomplete sentence to the model. Memory is durable state
+    **plus** that state reaching the prompt. Both halves are required.
 
-    Har turn ka SQL bhi bhejte hain, sirf answer nahi — agar pichhla sawaal
-    "highest average salary wala department" tha, to us SQL me `GROUP BY d.name
-    ORDER BY AVG(e.salary) DESC LIMIT 1` likha hai, jo model ko exactly batata
-    hai ki "unme se" ka referent kya hai. Angrezi answer se ye kam saaf hota hai.
+    Each turn's SQL goes in too, not just its answer. If the previous question
+    was "which department has the highest average salary?", its SQL contains
+    `GROUP BY d.name ORDER BY AVG(e.salary) DESC LIMIT 1`, which pins down what
+    "them" refers to far more precisely than an English answer does.
     """
     if not history:
         return ""
@@ -106,13 +107,13 @@ def generate_sql(state: AgentState) -> AgentState:
         else:
             logs.append("Generating initial SQL query.")
 
-    # **Ye constraint gate ke hisaab se badalti hai, aur badalni chahiye.**
-    # "Sirf SELECT likho" isliye tha kyunki koi approval gate nahi tha — model ki
-    # nikali hui koi bhi write seedha database tak jaati. Ab HITL wale path pe
-    # insaan har write ko dekhta hai, to yahan mana karte rehna poore Phase 3 ko
-    # dead code bana deta: gate kabhi trigger hi nahi hota kyunki destructive SQL
-    # kabhi banti hi nahi. Stateless path pe gate hai hi nahi, isliye wahan purani
-    # sakht line hi sahi hai.
+    # **This constraint changes with the gate, and it has to.**
+    # "Only write SELECT" existed *because* there was no approval gate: any write
+    # the model produced would have gone straight to the database. On the HITL
+    # path a human now reviews every write, so keeping the ban here would make the
+    # whole of Phase 3 dead code — the gate would never fire, because destructive
+    # SQL would never be generated. The stateless path has no gate, so the older,
+    # stricter line is the right one there.
     system_prompt = (
         "You are an expert PostgreSQL query writer. Write SELECT queries. "
         "If the user explicitly asks to modify data, write the appropriate "
@@ -136,19 +137,19 @@ def generate_sql(state: AgentState) -> AgentState:
 
 
 def is_destructive(sql_query: str) -> bool:
-    """SQL me koi write/DDL keyword hai ya nahi.
+    """Whether the SQL contains any write or DDL keyword.
 
-    Substring match hai, matlab conservative — string literal me aaya "updated"
-    bhi ise trigger kar dega. Ye jaan-boojh ke hai: false positive ka anjaam ek
-    fizool approval prompt hai, false negative ka anjaam bina puche data badal
-    jaana. Asli production answer database-level read-only role hai, jise prompt
-    injection se bypass nahi kiya ja sakta — ye uski jagah nahi leta.
+    Substring matching, so conservative — an "updated" inside a string literal
+    will trigger it. That is deliberate: a false positive costs one unnecessary
+    approval prompt, a false negative changes data nobody agreed to change. The
+    real production answer is a database-level read-only role, which cannot be
+    bypassed by prompt injection — this does not replace that.
     """
     return any(keyword in sql_query.upper() for keyword in config.BLOCKED_KEYWORDS)
 
 
 def needs_approval(state: AgentState) -> str:
-    """`generate_sql` ke baad ka conditional edge: approval chahiye ya seedha chalao."""
+    """The conditional edge after `generate_sql`: gate it, or run it."""
     if is_destructive(state.get("sql_query", "")):
         return "approval"
     return "execute"
