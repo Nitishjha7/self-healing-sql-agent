@@ -205,6 +205,14 @@ Near-term priorities are in [docs/ROADMAP.md](docs/ROADMAP.md). Longer term:
 - **Phase 3 — Human-in-the-Loop approval** ✅ A modifying statement pauses the graph and waits for a decision, instead of being blocked outright — see [Human-in-the-loop approval](#human-in-the-loop-approval). *Still open:* the approve endpoint is unauthenticated, exactly like `thread_id`. Anyone holding the thread id can approve a write on it.
 - **Phase 4 — Postgres checkpointer** ✅ Cross-session conversation memory, see [Conversation memory](#conversation-memory). *Still open:* multi-tenant isolation — one namespace per user, not just per thread.
 - **Phase 5 — AI-generated dashboards** ✅ "Create a dashboard showing X" is split into questions, each runs through the same self-healing agent, and the widget for each is picked from the **shape of its result** — not by another model call, because that part is a rule rather than a judgement. Lives beside chat mode rather than replacing it. *Still open:* the plan is one shot; it cannot notice a question came back useless and ask a better one.
+- **Phase 7 (next) — evaluate on Spider.** The honest limit of this project is
+  schema *scale*, not data realism: three tables is small, and a hand-written
+  schema description stops being possible somewhere around thirty. [Spider](https://yale-lily.github.io/spider)
+  is the standard Text-to-SQL benchmark and ships labelled gold queries, so it
+  answers the question this eval cannot — does an error-informed retry loop still
+  help on a schema an order of magnitude larger, or does the model start failing
+  *semantically* (valid SQL, wrong question) where the loop is blind? That is a
+  measurement, not a feature, which is why it ranks above anything else left.
 - **Phase 6 — Power BI export** ✅ A generated dashboard exports as a `.pbids` connection file plus one Power Query (M) script per widget, carrying the agent's SQL in DirectQuery mode. *Deliberately an export, not an integration:* publishing to a workspace needs an Azure AD app registration and tenant permissions this project does not have, and a button implying otherwise would be a lie.
 
 ## Positioning

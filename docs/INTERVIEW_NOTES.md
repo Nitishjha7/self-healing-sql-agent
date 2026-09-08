@@ -465,6 +465,41 @@ HITL ke liye LangGraph interrupt chahiye, aur interrupt checkpointer ke bina
 possible hi nahi — pause aur resume do alag HTTP requests hain.
 → *"Ye ittefaq nahi tha, precondition tha."*
 
+**Q: Ye to dummy data hai. Real dataset kyun nahi liya — Kaggle, Hugging Face?**
+
+A: Ye jawab **strong hai, defensive nahi.** Teen wajah, is order me:
+
+> "Data synthetic hai, aur deliberately hai.
+>
+> **Ek — mera eval isi pe tika hai.** Seed fixed hai (`random.Random(42)`), to har
+> machine par bilkul wahi 160 rows bante hain. Isi wajah se 95% / 90% / 15%→30%
+> jaise numbers alag runs ke beech compare karne layak rehte hain. Data har baar
+> badalta rehta to 'self-healing se accuracy badhi' wala daawa hi bemaani ho jaata,
+> kyunki pata hi nahi chalta ki accuracy loop se badhi ya data aasan ho gaya.
+>
+> **Do — schema agent ke liye design ki hui hai.** Maine jaanbujh kar `employees`
+> me department ka naam nahi rakha, taaki model ko join **infer** karna pade.
+> Salary bands roles se bandhe hain aur manager roles sirf 10% logon ko milte hain,
+> taaki 'average salary' aur 'highest paid' ke jawab alag aayein — flat random me
+> dono ka jawab shudh sanyog hota.
+>
+> **Teen — zyadatar public HR datasets ek flat CSV hote hain.** Wo import karte hi
+> main wahin wapas pahunch jaata jahan se shuru kiya tha: single table, koi join
+> nahi, aur self-healing loop ke liye koi error hi nahi. Wo upgrade nahi, downgrade
+> hota."
+
+**Aur phir khud aage badho — yahi answer ko complete karta hai:**
+
+> "Lekin ek asli kamzori hai, aur wo data ki nahi **schema ki** hai: teen tables
+> abhi bhi chhota hai. Real Text-to-SQL ki dikkat 30-50 tables aur ambiguity me
+> hai, jahan schema description prompt me fit hi nahi hoti aur schema retrieval
+> chahiye hota hai. Agla step Kaggle nahi hai — **Spider** hai, jo Text-to-SQL ka
+> academic benchmark hai aur jiske gold queries already labelled hain. Wo test
+> karega ki loop ek order of magnitude bade schema par bhi tikta hai ya nahi."
+
+> **Kyun ye line kaam karti hai:** tum sirf apni seema nahi bata rahe — tum ye bata
+> rahe ho ki **us seema ko test kaise karoge**, aur uske liye sahi tool kaunsa hai.
+
 **Q: Iska need kya hai? Ye to koi asli product nahi.**
 
 A: Over-sell mat karna.

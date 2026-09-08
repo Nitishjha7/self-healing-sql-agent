@@ -136,6 +136,41 @@ worth knowing before adding machinery.
 accuracy. It improved it here, in one condition, on a two-table schema, with one
 model, over 20 questions. That is a direction, not a proof.
 
+## Why the data is synthetic
+
+The rows are generated, not imported, and that is a decision this eval depends on.
+
+`random.Random(42)` is fixed, so every machine builds the identical 160 employees.
+Without that, the numbers above could not be compared between runs — a change in
+accuracy would be indistinguishable from a change in the data. The comparison
+across three conditions is the whole point, and it only holds if the only thing
+that varies is the schema description.
+
+The schema is also shaped for the task rather than found: `employees` deliberately
+has no department-name column, so a join must be inferred; salary bands are tied
+to roles and manager roles are rare, so "average salary" and "highest paid" have
+different answers instead of coinciding by chance. Most public HR datasets are a
+single flat CSV, which would remove the join entirely — and with it the class of
+error this loop exists to repair.
+
+## What would make this eval genuinely hard
+
+Not more realistic *data* — a larger *schema*. Three tables is small enough that a
+hand-written description fits comfortably in the prompt, and that description is
+doing a lot of work: it names the join key and states outright that a join is
+required. Somewhere around thirty tables that stops being possible, and the agent
+has to retrieve the relevant subset of the schema before it can write anything.
+
+[Spider](https://yale-lily.github.io/spider) is the standard benchmark for exactly
+this, and it ships labelled gold queries, so the harness here would need a loader
+rather than a rewrite. The question it would answer is the one this eval cannot:
+**does an error-informed retry loop still help at that scale, or do failures shift
+from syntactic to semantic** — valid SQL answering the wrong question — where the
+loop is structurally blind?
+
+That is the most useful thing left to do to this project, and it is a measurement
+rather than a feature.
+
 ## Reproducing
 
 ```bash
