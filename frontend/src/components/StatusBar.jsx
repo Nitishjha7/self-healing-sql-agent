@@ -55,11 +55,6 @@ export default function StatusBar({ meta, turn, loading }) {
               value={meta.data_access === "mcp" ? "MCP tools" : "direct driver"}
             />
             <span className="sb-sep" />
-            <span className="sb-field">
-              <IconRefresh size={12} />
-              <span className="sb-value">retry budget {meta.max_retries}</span>
-            </span>
-            <span className="sb-sep" />
             {/* Amber when an approved write would really commit. This is the one
                 field on the bar where the safe value is the quiet one. */}
             <span className={`sb-field ${meta.writes === "commit" ? "warn" : ""}`}>
@@ -70,6 +65,14 @@ export default function StatusBar({ meta, turn, loading }) {
             <span className={`sb-field ${meta.memory ? "" : "muted"}`}>
               <IconBrain size={12} />
               <span className="sb-value">memory {meta.memory ? "on" : "off"}</span>
+            </span>
+            {/* Ordered last and marked optional: fields are laid out most- to
+                least-informative, so whatever the bar has to give up first is
+                the thing worth least. */}
+            <span className="sb-sep optional" />
+            <span className="sb-field optional">
+              <IconRefresh size={12} />
+              <span className="sb-value">retry budget {meta.max_retries}</span>
             </span>
           </>
         )}

@@ -1033,22 +1033,47 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  /* Takes the leftover width so the mask below lands on empty space whenever the
+     fields fit, and only bites when they genuinely do not. */
+  flex: 1;
   min-width: 0;
   /* Narrow windows scroll this row rather than wrapping it — a status bar that
      grows to two lines stops being furniture and starts moving the layout. */
   overflow-x: auto;
   scrollbar-width: none;
   white-space: nowrap;
+  /* Overflow fades out instead of being cut mid-word. A hard edge through the
+     middle of a letter reads as a rendering bug; a fade reads as "there is more
+     here", which is what it means — the row still scrolls. */
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
 }
 
 .sb-group::-webkit-scrollbar {
   display: none;
 }
 
+/* `flex: 0 0 auto`, not just `flex-shrink: 0` — the base rule's `flex: 1` sets
+   grow *and* a zero basis, so without resetting all three this group claimed half
+   the bar and the left one faded out at the midpoint. The mask comes off too:
+   nothing here overflows, and fading the last run would hide the one value that
+   changes every turn. */
 .sb-group.right {
   justify-content: flex-end;
-  flex-shrink: 0;
+  flex: 0 0 auto;
   overflow: visible;
+  mask-image: none;
+  -webkit-mask-image: none;
+}
+
+/* Dropped first when the bar runs out of room. The retry budget is a constant
+   that the README and the docs both state; everything else on the bar either
+   changes per deployment or per turn. */
+@media (max-width: 1600px) {
+  .sb-field.optional,
+  .sb-sep.optional {
+    display: none;
+  }
 }
 
 .sb-sep {
