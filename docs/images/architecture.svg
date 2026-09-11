@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 330" width="1000" height="330" font-family="ui-sans-serif,-apple-system,Segoe UI,Roboto,sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#64748b"/>
+    </marker>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#f59e0b"/>
+    </marker>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#818cf8"/>
+    </marker>
+    <style>
+      .b  { fill:#0f172a; stroke:#334155; rx:8 }
+      .bi { fill:#1e1b4b; stroke:#4f46e5; rx:8 }
+      .bg { fill:#052e2b; stroke:#0d9488; rx:8 }
+      .bw { fill:#1c1917; stroke:#57534e; rx:8 }
+      .bd { fill:#2a1a05; stroke:#b45309; rx:8 }
+      .t  { fill:#e2e8f0; font-size:13px; font-weight:600 }
+      .s  { fill:#94a3b8; font-size:10.5px }
+      .l  { fill:#64748b; font-size:10px; font-style:italic }
+      .lr { fill:#f59e0b; font-size:10px; font-style:italic }
+      .e  { stroke:#64748b; stroke-width:1.4; fill:none; marker-end:url(#a) }
+      .er { stroke:#f59e0b; stroke-width:1.7; fill:none; marker-end:url(#ar) }
+      .eh { stroke:#818cf8; stroke-width:1.5; fill:none; marker-end:url(#ah) }
+    </style>
+  </defs>
+
+  <rect width="1000" height="330" fill="#020617"/>
+
+  <!-- question -->
+  <rect class="b" x="12" y="104" width="88" height="44"/>
+  <text class="t" x="56" y="123" text-anchor="middle">Question</text>
+  <text class="s" x="56" y="138" text-anchor="middle">plain English</text>
+
+  <path class="e" d="M100 126 H118"/>
+
+  <!-- generate_sql -->
+  <rect class="bi" x="118" y="96" width="156" height="64"/>
+  <text class="t" x="196" y="117" text-anchor="middle">generate_sql</text>
+  <text class="s" x="196" y="132" text-anchor="middle">schema + history</text>
+  <text class="s" x="196" y="146" text-anchor="middle">+ the last error, on retry</text>
+
+  <path class="e" d="M274 126 H296"/>
+
+  <!-- write gate -->
+  <rect class="bw" x="296" y="98" width="134" height="60"/>
+  <text class="t" x="363" y="119" text-anchor="middle">modifies data?</text>
+  <text class="s" x="363" y="134" text-anchor="middle">keyword scan</text>
+  <text class="s" x="363" y="147" text-anchor="middle">deterministic</text>
+
+  <!-- to approval -->
+  <path class="eh" d="M363 98 V56 H470"/>
+  <text class="l" x="372" y="50">yes</text>
+
+  <rect class="bd" x="470" y="30" width="150" height="52"/>
+  <text class="t" x="545" y="51" text-anchor="middle">human approval</text>
+  <text class="s" x="545" y="67" text-anchor="middle">interrupt — graph pauses</text>
+
+  <path class="eh" d="M620 56 H676 V96"/>
+  <text class="l" x="628" y="50">approved</text>
+
+  <!-- no -> execute -->
+  <path class="e" d="M430 128 H676"/>
+  <text class="l" x="519" y="120" text-anchor="middle">no — read-only</text>
+
+  <!-- execute -->
+  <rect class="b" x="608" y="96" width="140" height="60"/>
+  <text class="t" x="678" y="117" text-anchor="middle">execute_sql</text>
+  <text class="s" x="678" y="132" text-anchor="middle">Postgres, via MCP</text>
+  <text class="s" x="678" y="146" text-anchor="middle">or direct driver</text>
+
+  <!-- error branch -->
+  <path class="er" d="M678 156 V214 H196 V160"/>
+  <text class="lr" x="330" y="208">error → feed the Postgres message back in  ·  up to 3 times</text>
+
+  <!-- success -->
+  <path class="e" d="M748 126 H796"/>
+  <text class="l" x="752" y="118">ok</text>
+
+  <!-- synthesize -->
+  <rect class="b" x="796" y="96" width="150" height="60"/>
+  <text class="t" x="871" y="117" text-anchor="middle">synthesize</text>
+  <text class="s" x="871" y="132" text-anchor="middle">rows → sentence</text>
+  <text class="s" x="871" y="146" text-anchor="middle">read-only narration guard</text>
+
+  <path class="e" d="M871 156 V238"/>
+
+  <!-- answer -->
+  <rect class="bg" x="796" y="238" width="150" height="52"/>
+  <text class="t" x="871" y="259" text-anchor="middle">Answer + SQL</text>
+  <text class="s" x="871" y="275" text-anchor="middle">retry badge · full trace</text>
+
+  <!-- notes -->
+  <text class="l" x="12" y="262">Indigo is where the model decides. The write gate and the retry edge are</text>
+  <text class="l" x="12" y="277">deterministic on purpose: control flow here is driven by the database's</text>
+  <text class="l" x="12" y="292">answer, not the model's opinion of it.</text>
+  <text class="lr" x="12" y="312">Amber is the self-healing loop — the one edge the whole project exists for.</text>
+</svg>

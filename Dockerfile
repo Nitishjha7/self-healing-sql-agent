@@ -14,7 +14,7 @@ FROM node:20-alpine AS frontend
 WORKDIR /fe
 
 COPY frontend/package.json frontend/package-lock.json* ./
-RUN npm install
+RUN npm ci
 
 COPY frontend/ ./
 # Empty API base => the SPA calls /api on its own origin, which is this same

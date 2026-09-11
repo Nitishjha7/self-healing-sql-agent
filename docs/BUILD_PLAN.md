@@ -134,6 +134,24 @@ commit.
 
 ---
 
+## How this was built
+
+The code was written with heavy use of an AI coding assistant (Claude), working
+through the order above, with each stage run against a real Postgres and a real
+model before moving on.
+
+What that did **not** decide: that the evaluation had to come before the features,
+that a `+0pp` result had to be published rather than buried, that a third condition
+was needed to make the loop actually fire, that the write gate and the retry edge
+must stay deterministic rather than become the model's opinion, and that a
+synthesizer which narrated a deletion that never happened was a bug worth a
+prominent write-up.
+
+Those judgements, and the measurements behind them, are the project. They are in
+[CODE_QA.md](CODE_QA.md) and [eval/RESULTS.md](../eval/RESULTS.md).
+
+---
+
 ## How to read the rest
 
 | | |

@@ -1,4 +1,17 @@
-# PRISM INTEL — Self-Healing AI Data Agent
+<div align="center">
+
+# PRISM INTEL
+
+**A Text-to-SQL agent that repairs its own query from the database's error message.**
+
+[![tests](https://github.com/Nitishjha7/self-healing-sql-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Nitishjha7/self-healing-sql-agent/actions/workflows/ci.yml)
+[![self-healing](https://img.shields.io/badge/stale%20schema-15%25%20→%2030%25-3fb950)](eval/RESULTS.md)
+[![LangGraph](https://img.shields.io/badge/LangGraph-cyclic%20%2B%20interrupt-4f46e5)](backend/app/graph.py)
+[![MCP](https://img.shields.io/badge/MCP-stdio%20server-8b5cf6)](backend/mcp_server/server.py)
+[![Gemini](https://img.shields.io/badge/Gemini-flash--lite-f97316)](backend/app/config.py)
+[![license](https://img.shields.io/badge/license-MIT-64748b)](LICENSE)
+
+</div>
 
 Ask a database a question in English. The agent writes the SQL, runs it, and **repairs its own query from the database's error message** — then validates its answer before showing it to you.
 
@@ -8,32 +21,37 @@ Most Text-to-SQL demos are a single LLM call: if the generated SQL is wrong, the
 
 ---
 
+<p align="center">
+  <img src="docs/images/architecture.svg" alt="Architecture: a question becomes SQL, passes a deterministic write gate that can pause for human approval, executes against Postgres, and on error loops back with the error text before synthesis" width="100%">
+</p>
+
+<p align="center">
+  <sub>Amber is the self-healing loop — the one edge this project exists for. The write
+  gate and the retry edge are deterministic on purpose: control flow is driven by the
+  database's answer, not the model's opinion of it.</sub>
+</p>
+
+---
+
 ## How it works
 
-```mermaid
-flowchart LR
-    Q([Question])
-    G[generate_sql]
-    D{Modifies data?}
-    A[/Human approval/]
-    E[execute_sql]
-    R{Postgres error?}
-    S[synthesize + validate]
-    OUT([Answer + SQL + trace])
+The diagram above is the whole graph. The edge that matters is the amber one: the
+failed SQL **and** the database's error text go back into the prompt, so the second
+attempt is *informed* rather than a re-roll. Postgres usually names the problem
+outright —
 
-    Q --> G --> D
-    D -- no --> E
-    D -- yes --> A
-    A -- approved --> E
-    A -- rejected --> S
-    E --> R
-    R -- no --> S
-    R -- "retries exhausted" --> S
-    R -- "yes — retry with the error text" --> G
-    S --> OUT
+```
+column "emp_name" does not exist
+HINT:  Perhaps you meant to reference the column "employees.name".
 ```
 
-The retry edge is the whole project: the failed SQL **and** the database's error text go back into the prompt, so the second attempt is informed rather than a re-roll. Everything the agent did is returned to the UI as a step-by-step trace.
+— and that hint is exactly what the retry prompt consumes. Everything the agent did
+comes back to the UI as a step-by-step trace, including the attempts that failed.
+
+Two branches are deliberately **not** the model's decision. Whether a query modifies
+data is a keyword scan, and whether to retry is driven by whether Postgres raised an
+error. A model that can be argued into "this DELETE is fine actually" is not a
+safety control.
 
 ---
 
@@ -114,7 +132,8 @@ docker build -f backend/Dockerfile.test -t sql-agent-test backend && docker run 
 
 Stated here rather than discovered later:
 
-- **Not deployed yet** — no live URL. Steps are checklisted at the top of [DEPLOYMENT.md](docs/DEPLOYMENT.md).
+- **Not deployed yet** — no live URL, though the image is ready and verified: `Dockerfile` + `render.yaml` at the repo root, one service serving both the API and the SPA, measured at **107 MB** against Render free's 512 MB. Remaining steps are checklisted at the top of [DEPLOYMENT.md](docs/DEPLOYMENT.md).
+- **Latency depends on the free tier's mood** — a bare Gemini call was 1.3s cold and 30s once the daily quota was under pressure, which turns a two-call query into a 70s wait. That is the provider throttling, not the graph; a live demo needs either a paid key or patience.
 - **No authentication** — anyone holding a `thread_id` can read that conversation or approve a write on it.
 - **Three tables** — a hand-written schema description stops scaling somewhere around thirty. Whether an error-informed retry loop still helps at that size is the next thing worth measuring, on [Spider](https://yale-lily.github.io/spider).
 - **MCP talks to our own server** — the protocol's real payoff, pointing the same agent at a third-party server, has not been demonstrated.

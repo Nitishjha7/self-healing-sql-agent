@@ -4,7 +4,7 @@ WORKDIR /app
 
 # Dependencies first so a source edit doesn't reinstall node_modules.
 COPY package.json package-lock.json* ./
-RUN npm install
+RUN npm ci
 
 COPY . .
 RUN npm run build

@@ -1,0 +1,115 @@
+name: tests
+
+# The suite is LLM-free and database-free by design: it covers the semantics of
+# the graph (history formatting, the per-turn reset invariant, the write gate,
+# SQL extraction, the MCP bridge) rather than the model's answers. So CI needs no
+# GOOGLE_API_KEY and no Postgres, and a fork's pull request runs it in full.
+#
+# What this does NOT cover: answer quality. That is measured by `eval/`, which
+# needs a key and a seeded database — and the Gemini free tier allows 20 requests
+# a day, so it could not run per-push even if a key were available.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  backend:
+    name: backend · 69 tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt pytest
+
+      - name: Run tests
+        working-directory: backend
+        run: python -m pytest -q
+
+  frontend:
+    name: frontend · production build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+  deploy-image:
+    name: deploy image · builds and serves
+    runs-on: ubuntu-latest
+
+    # A real Postgres, because the image needs one. `init_db()` runs on startup
+    # and the service exits 3 if it cannot connect — verified by trying it
+    # without a database. That is the right behaviour (a data agent with no data
+    # should fail loudly, not serve a broken page), but it does mean this job
+    # cannot boot the image without a database, and that a wrong DATABASE_URL on
+    # Render is a crash loop rather than a degraded deploy.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: agent
+          POSTGRES_PASSWORD: agent
+          POSTGRES_DB: employees
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agent"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Builds the single-service image the Render blueprint deploys. Failing
+      # here is cheap; failing on Render is slow and public.
+      - name: Build the single-service image
+        run: docker build -f Dockerfile -t prism-intel:ci .
+
+      - name: Boot it and check the API and the SPA
+        run: |
+          docker run -d --name ci --network host \
+            -e DATABASE_URL="postgresql://agent:agent@localhost:5432/employees" \
+            -e GOOGLE_API_KEY=dummy-key-for-boot \
+            prism-intel:ci
+          for i in $(seq 1 40); do
+            if curl -fsS http://localhost:8000/health >/dev/null 2>&1; then
+              echo "healthy after ${i}s"
+              # The SPA has to come from the same origin, or the whole reason for
+              # the single-service image is gone.
+              test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/)" = "200"
+              echo "SPA served from the same origin"
+              # init_db() seeds on first boot; if that silently did nothing the
+              # deployed demo would be an empty database with a working UI.
+              test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/api/health)" = "200"
+              echo "API reachable"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "never became healthy:"
+          docker logs ci
+          exit 1
