@@ -100,9 +100,14 @@ docker build -f backend/Dockerfile.test -t sql-agent-test backend && docker run 
 | Document | Contents |
 |---|---|
 | **[PROJECT_WALKTHROUGH.md](docs/PROJECT_WALKTHROUGH.md)** | **Start here** — request flowchart, what was built in what order and why |
+| [SETUP.md](docs/SETUP.md) | Running it locally, the dev loops, and every error this project hit |
 | [TECHNICAL_SPEC.md](docs/TECHNICAL_SPEC.md) | Architecture and state schema |
 | [CODE_NOTES.md](docs/CODE_NOTES.md) | Why each file and dependency exists |
+| [CODE_QA.md](docs/CODE_QA.md) | Hard questions about specific lines, with answers |
+| [TEXT_TO_SQL_FUNDAMENTALS.md](docs/TEXT_TO_SQL_FUNDAMENTALS.md) | The field this sits in — pipeline, metrics, benchmarks, interview prep |
 | [INTERVIEW_NOTES.md](docs/INTERVIEW_NOTES.md) | Trade-offs, and the questions this design invites |
+| [ROADMAP.md](docs/ROADMAP.md) | What is built, what is not, what is next — and what is refused |
+| [BUILD_PLAN.md](docs/BUILD_PLAN.md) | How the build was run, and where the time actually went |
 | [DEPLOYMENT.md](docs/DEPLOYMENT.md) | Free single-service deploy (Render + Neon) |
 
 ## Known limits
