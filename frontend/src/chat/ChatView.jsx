@@ -2,10 +2,18 @@ import Turn from "./Turn.jsx";
 
 /** The transcript. Empty state offers starters; after an answer, follow-ups. */
 
+// Bangalore now holds two departments (Engineering + Data Science, ~64 people
+// combined) and every department has 9+ employees, so the two questions this
+// used to ask — "who works there" and "which departments have more than two
+// people" — either dump a 64-name list into a one-or-two-sentence prompt or
+// return a trivially-true answer for all eight. Replaced with a JOIN over the
+// third table (a query shape chip #1 doesn't already cover) and a narrower
+// version of the Bangalore question that collapses to one clean answer instead
+// of a wall of names.
 const EXAMPLES = [
   "Which department has the highest average salary?",
-  "Who works in Bangalore?",
-  "Which departments have more than two employees?",
+  "Which department has the most people in Bangalore?",
+  "How many active projects does each department have?",
   "Delete all employees from HR",
 ];
 
